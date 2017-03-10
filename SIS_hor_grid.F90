@@ -12,6 +12,7 @@ use MOM_domains, only : MOM_domain_type, get_domain_extent, compute_block_extent
 use MOM_domains, only : MOM_domains_init, clone_MOM_domain
 use MOM_error_handler, only : SIS_error=>MOM_error, FATAL, WARNING, SIS_mesg=>MOM_mesg
 use MOM_file_parser, only : get_param, log_param, log_version, param_file_type
+use MOM_transform_test, only : transform
 
 implicit none ; private
 
@@ -280,6 +281,71 @@ subroutine set_hor_grid(G, param_file, HI, global_indexing)
         call SIS_error(FATAL, "SIS: set_hor_grid: G%jed_bk > G%jed")
 
 end subroutine set_hor_grid
+
+subroutine transform_sis_hor_grid(G_in, G_out)
+  type(SIS_hor_grid_type), intent(in) :: G_in  !< The horizontal grid type
+  type(SIS_hor_grid_type), intent(out) :: G_out !< The horizontal grid type
+
+  call transform(G%dyT, G_trans%dxT)
+  call transform(G%dxT, G_trans%dyT)
+  call transform(G%IdyT, G_trans%IdxT)
+  call transform(G%IdxT, G_trans%IdyT)
+
+  call transform(G%dyBu, G_trans%dxBu)
+  call transform(G%dxBu, G_trans%dyBu)
+  call transform(G%IdyBu, G_trans%IdxBu)
+  call transform(G%IdxBu, G_trans%IdyBu)
+
+  call transform(G%dyCu, G_trans%dxCv)
+  call transform(G%dxCu, G_trans%dyCv)
+  call transform(G%IdyCu, G_trans%IdxCv)
+  call transform(G%IdxCu, G_trans%IdyCv)
+
+  call transform(G%dyCv, G_trans%dxCu)
+  call transform(G%dxCv, G_trans%dyCu)
+  call transform(G%IdyCv, G_trans%IdxCu)
+  call transform(G%IdxCv, G_trans%IdyCu)
+
+  call transform(G%dy_Cu, G_trans%dx_Cv)
+  call transform(G%dy_Cu_obc, G_trans%dx_Cv_obc)
+
+  call transform(G%dx_Cv, G_trans%dy_Cu)
+  call transform(G%dx_Cv_obc, G_trans%dy_Cu_obc)
+
+  call transform(G%mask2dT, G_trans%mask2dT)
+  call transform(G%mask2dBu, G_trans%mask2dBu)
+
+  call transform(G%mask2dCu, G_trans%mask2dCv)
+  call transform(G%mask2dCv, G_trans%mask2dCu)
+
+  call transform(G%geoLatT, G_trans%geoLatT)
+  call transform(G%geoLonT, G_trans%geoLonT)
+  call transform(G%geoLatBu, G_trans%geoLatBu)
+  call transform(G%geoLonBu, G_trans%geoLonBu)
+
+  call transform(G%geoLatCu, G_trans%geoLatCv)
+  call transform(G%geoLonCu, G_trans%geoLonCv)
+  call transform(G%geoLatCv, G_trans%geoLatCu)
+  call transform(G%geoLonCv, G_trans%geoLonCu)
+
+  call transform(G%areaT, G_trans%areaT)
+  call transform(G%IareaT, G_trans%IareaT)
+  call transform(G%areaBu, G_trans%areaBu)
+  call transform(G%IareaBu, G_trans%IareaBu)
+  call transform(G%areaCu, G_trans%areaCv)
+  call transform(G%IareaCu, G_trans%IareaCv)
+  call transform(G%areaCv, G_trans%areaCu)
+  call transform(G%IareaCv, G_trans%IareaCu)
+
+  call transform(G%sin_rot, G_trans%sin_rot)
+  call transform(G%cos_rot, G_trans%cos_rot)
+  call transform(G%bathyT, G_trans%bathyT)
+
+  call transform(G%CoriolisBu, G_trans%CoriolisBu)
+  call transform(G%dF_dx, G_trans%dF_dy)
+  call transform(G%dF_dy, G_trans%dF_dx)
+
+end subroutine
 
 
 !> set_derived_SIS_metrics calculates metric terms that are derived from other metrics.

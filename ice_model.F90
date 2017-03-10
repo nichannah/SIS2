@@ -62,6 +62,7 @@ use MOM_string_functions, only : uppercase
 use MOM_time_manager, only : time_type, time_type_to_real, real_to_time_type
 use MOM_time_manager, only : set_date, set_time, operator(+), operator(-)
 use MOM_time_manager, only : operator(>), operator(*), operator(/), operator(/=)
+use MOM_transform_test, only : MOM_transform_test_init, transform_test_start, do_transform_on_this_pe
 
 use fms_mod, only : file_exist, clock_flag_default
 use fms_io_mod, only : set_domain, nullify_domain, restore_state, query_initialized
@@ -1903,6 +1904,7 @@ subroutine ice_model_init(Ice, Time_Init, Time, Time_step_fast, Time_step_slow, 
 
   Ice%Time = Time
 
+
   !   Now that all top-level sea-ice parameters have been read, allocate the
   ! various structures and register fields for restarts.
   if (slow_ice_PE) then
@@ -1928,7 +1930,6 @@ subroutine ice_model_init(Ice, Time_Init, Time, Time_step_fast, Time_step_slow, 
     if (slab_ice) sIG%CatIce = 1 ! open water and ice ... but never in same place
     CatIce = sIG%CatIce ; NkIce = sIG%NkIce
     call initialize_ice_categories(sIG, Rho_ice, param_file)
-
 
     ! Set up the domains and lateral grids.
     if (.not.associated(Ice%sCS%G)) allocate(Ice%sCS%G)
@@ -1959,6 +1960,17 @@ subroutine ice_model_init(Ice, Time_Init, Time, Time_step_fast, Time_step_slow, 
     call set_hor_grid(sG, param_file, global_indexing=global_indexing)
     call copy_dyngrid_to_SIS_horgrid(dG, sG)
     call destroy_dyn_horgrid(dG)
+
+    ! Start the transform test after creating the grid.
+    call MOM_transform_test_init(param_file)
+    if (do_transform_on_this_pe()) then
+      call transform_domain(sGD, sGD)
+      call set_hor_grid(sG, param_file, global_indexing=global_indexing)
+      call transform_sis_hor_grid(sG, sG)
+    endif
+    call transform_test_start()
+
+    print*, 'SIS do_transform_on_this_pe()', do_transform_on_this_pe()
 
   ! Allocate and register fields for restarts.
 
