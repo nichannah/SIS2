@@ -19,11 +19,15 @@ implicit none ; private
 #include <SIS2_memory.h>
 
 public :: set_hor_grid, SIS_hor_grid_end, set_derived_SIS_metrics, set_first_direction, isPointInCell
+public :: transform_sis_hor_grid
 
 type, public :: SIS_hor_grid_type
   type(MOM_domain_type), pointer :: Domain => NULL()
   type(MOM_domain_type), pointer :: Domain_aux => NULL() ! A non-symmetric auxiliary domain type.
   type(hor_index_type) :: HI
+
+  type(SIS_hor_grid_type), pointer :: self_untrans
+
   integer :: isc, iec, jsc, jec ! The range of the computational domain indices
   integer :: isd, ied, jsd, jed ! and data domain indices at tracer cell centers.
   integer :: isg, ieg, jsg, jeg ! The range of the global domain tracer cell indices.
@@ -282,9 +286,9 @@ subroutine set_hor_grid(G, param_file, HI, global_indexing)
 
 end subroutine set_hor_grid
 
-subroutine transform_sis_hor_grid(G_in, G_out)
-  type(SIS_hor_grid_type), intent(in) :: G_in  !< The horizontal grid type
-  type(SIS_hor_grid_type), intent(out) :: G_out !< The horizontal grid type
+subroutine transform_sis_hor_grid(G, G_trans)
+  type(SIS_hor_grid_type), intent(in) :: G !< The horizontal grid type
+  type(SIS_hor_grid_type), intent(out) :: G_trans !< The horizontal grid type
 
   call transform(G%dyT, G_trans%dxT)
   call transform(G%dxT, G_trans%dyT)

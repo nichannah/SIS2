@@ -38,7 +38,8 @@
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~!
 module ice_model_mod
 
-use SIS_debugging,     only : chksum, uchksum, vchksum, Bchksum, SIS_debugging_init
+use SIS_debugging,     only : chksum, hchksum, qchksum, uchksum, vchksum, Bchksum, SIS_debugging_init
+use SIS_debugging,     only : uvchksum_pair
 use SIS_diag_mediator, only : set_SIS_axes_info, SIS_diag_mediator_init, SIS_diag_mediator_end
 use SIS_diag_mediator, only : enable_SIS_averaging, disable_SIS_averaging
 use SIS_diag_mediator, only : post_SIS_data, post_data=>post_SIS_data
@@ -52,6 +53,7 @@ use MOM_domains,       only : MOM_domain_type
 use MOM_domains,       only : pass_var, pass_vector, AGRID, BGRID_NE, CGRID_NE
 use MOM_domains,       only : fill_symmetric_edges, MOM_domains_init, clone_MOM_domain
 use MOM_dyn_horgrid, only : dyn_horgrid_type, create_dyn_horgrid, destroy_dyn_horgrid
+use MOM_dyn_horgrid, only : create_dyn_horgrid_untrans, transform_init_dyn_horgrid
 use MOM_error_handler, only : SIS_error=>MOM_error, FATAL, WARNING, SIS_mesg=>MOM_mesg
 use MOM_error_handler, only : callTree_enter, callTree_leave, callTree_waypoint
 use MOM_file_parser, only : get_param, log_param, log_version, read_param, param_file_type
@@ -62,7 +64,7 @@ use MOM_string_functions, only : uppercase
 use MOM_time_manager, only : time_type, time_type_to_real, real_to_time_type
 use MOM_time_manager, only : set_date, set_time, operator(+), operator(-)
 use MOM_time_manager, only : operator(>), operator(*), operator(/), operator(/=)
-use MOM_transform_test, only : MOM_transform_test_init, transform_test_start, do_transform_on_this_pe
+use MOM_transform_test, only : MOM_transform_test_init, do_transform_on_this_pe
 
 use fms_mod, only : file_exist, clock_flag_default
 use fms_io_mod, only : set_domain, nullify_domain, restore_state, query_initialized
@@ -103,6 +105,7 @@ use SIS_types, only : redistribute_sOSS_to_sOSS, FIA_chksum, IOF_chksum, transla
 use SIS_types, only : VIS_DIR, VIS_DIF, NIR_DIR, NIR_DIF
 use SIS_utils, only : post_avg, ice_grid_chksum
 use SIS_hor_grid, only : SIS_hor_grid_type, set_hor_grid, SIS_hor_grid_end, set_first_direction
+use SIS_hor_grid, only : transform_sis_hor_grid
 use SIS_fixed_initialization, only : SIS_initialize_fixed
 
 use ice_grid, only : set_ice_grid, ice_grid_end, ice_grid_type
@@ -1565,6 +1568,11 @@ subroutine ice_model_init(Ice, Time_Init, Time, Time_step_fast, Time_step_slow, 
   type(SIS_hor_grid_type), pointer :: fG => NULL()
   type(MOM_domain_type), pointer :: fGD => NULL()
 
+  !
+  type(dyn_horgrid_type), pointer :: dG_untrans => NULL()
+  type(SIS_hor_grid_type), pointer :: sG_untrans => NULL()
+  type(hor_index_type)  :: sHI_untrans
+
   ! Parameters that are read in and used to initialize other modules.  If those
   ! other modules had control states, these would be moved to those modules.
   real :: mom_rough_ice  ! momentum same, cd10=(von_k/ln(10/z0))^2, in m.
@@ -1935,6 +1943,9 @@ subroutine ice_model_init(Ice, Time_Init, Time, Time_step_fast, Time_step_slow, 
     if (.not.associated(Ice%sCS%G)) allocate(Ice%sCS%G)
     sG => Ice%sCS%G
 
+    ! This may have already been called by MOM.
+    call MOM_transform_test_init(param_file)
+
     ! Set up the MOM_domain_type structures.
 #ifdef STATIC_MEMORY_
     call MOM_domains_init(Ice%sCS%G%domain, param_file, symmetric=symmetric, &
@@ -1955,22 +1966,44 @@ subroutine ice_model_init(Ice, Time_Init, Time, Time_step_fast, Time_step_slow, 
     call clone_MOM_domain(sGD, dG%Domain)
 
     ! Set the bathymetry, Coriolis parameter, open channel widths and masks.
-    call SIS_initialize_fixed(dG, param_file, write_geom_files, dirs%output_directory)
+
+    if (do_transform_on_this_pe()) then
+      call create_dyn_horgrid_untrans(dG_untrans, sHI_untrans, param_file)
+      call SIS_initialize_fixed(dG_untrans, param_file, &
+                                write_geom_files, dirs%output_directory)
+      call transform_init_dyn_horgrid(dG_untrans, dG)
+
+    else
+      call SIS_initialize_fixed(dG, param_file, write_geom_files, &
+                                dirs%output_directory)
+    endif
+
+    ! FIXME: put these in a subroutine.
+    if (debug) then
+      call hchksum(dG%bathyT, 'SIS_initialize_fixed: depth ', dG%HI, &
+                   haloshift=min(1, dG%ied-dG%iec, dG%jed-dG%jec))
+      call hchksum(dG%mask2dT, 'SIS_initialize_fixed: mask2dT ', dG%HI)
+      call uvchksum_pair(dG%mask2dCu, 'SIS_initialize_fixed: mask2dCu ', &
+                         dG%mask2dCv, 'SIS_initialize_fixed: mask2dCv ', dG%HI)
+      call qchksum(dG%mask2dBu, 'SIS_initialize_fixed: mask2dBu ', dG%HI)
+
+      call qchksum(dG%CoriolisBu, "SIS_initialize_fixed: f ", dG%HI)
+      call hchksum(dG%dF_dx, "SIS_initialize_fixed: dF_dx ", dG%HI)
+      call hchksum(dG%dF_dy, "SIS_initialize_fixed: dF_dy ", dG%HI)
+    endif
 
     call set_hor_grid(sG, param_file, global_indexing=global_indexing)
     call copy_dyngrid_to_SIS_horgrid(dG, sG)
     call destroy_dyn_horgrid(dG)
 
-    ! Start the transform test after creating the grid.
-    call MOM_transform_test_init(param_file)
+    ! Keep a copy of the untransformed G. This is used to initialize state.
     if (do_transform_on_this_pe()) then
-      call transform_domain(sGD, sGD)
-      call set_hor_grid(sG, param_file, global_indexing=global_indexing)
-      call transform_sis_hor_grid(sG, sG)
+      allocate(sG%self_untrans)
+      call set_hor_grid(sG_untrans, param_file, &
+                        global_indexing=global_indexing)
+      call copy_dyngrid_to_SIS_horgrid(dG_untrans, sG%self_untrans)
+      call destroy_dyn_horgrid(dG_untrans)
     endif
-    call transform_test_start()
-
-    print*, 'SIS do_transform_on_this_pe()', do_transform_on_this_pe()
 
   ! Allocate and register fields for restarts.
 

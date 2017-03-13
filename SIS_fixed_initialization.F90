@@ -68,15 +68,6 @@ subroutine SIS_initialize_fixed(G, PF, write_geom, output_dir)
 ! Initialize the various masks and any masked metrics.
   call initialize_masks(G, PF)
 
-  if (debug) then
-    call hchksum(G%bathyT, 'SIS_initialize_fixed: depth ', G%HI, &
-                 haloshift=min(1, G%ied-G%iec, G%jed-G%jec))
-    call hchksum(G%mask2dT, 'SIS_initialize_fixed: mask2dT ', G%HI)
-    call uchksum(G%mask2dCu, 'SIS_initialize_fixed: mask2dCu ', G%HI)
-    call vchksum(G%mask2dCv, 'SIS_initialize_fixed: mask2dCv ', G%HI)
-    call qchksum(G%mask2dBu, 'SIS_initialize_fixed: mask2dBu ', G%HI)
-  endif
-
 ! Modulate geometric scales according to geography.
   call get_param(PF, mod, "CHANNEL_CONFIG", config, &
                  "A parameter that determines which set of channels are \n"//&
@@ -105,12 +96,6 @@ subroutine SIS_initialize_fixed(G, PF, write_geom, output_dir)
   call MOM_initialize_rotation(G%CoriolisBu, G, PF)
 !   Calculate the components of grad f (beta)
   call MOM_calculate_grad_Coriolis(G%dF_dx, G%dF_dy, G)
-  if (debug) then
-    call qchksum(G%CoriolisBu, "SIS_initialize_fixed: f ", G%HI)
-    call hchksum(G%dF_dx, "SIS_initialize_fixed: dF_dx ", G%HI)
-    call hchksum(G%dF_dy, "SIS_initialize_fixed: dF_dy ", G%HI)
-  endif
-
   call initialize_grid_rotation_angle(G, PF)
 
 ! Write out all of the grid data used by this run.
