@@ -28,7 +28,7 @@ use MOM_domains,        only : SCALAR_PAIR, CGRID_NE, BGRID_NE, To_All
 use MOM_error_handler,  only : SIS_error=>MOM_error, FATAL, WARNING, SIS_mesg=>MOM_mesg
 use MOM_error_handler,  only : is_root_pe
 use SIS_diag_mediator,  only : post_SIS_data, SIS_diag_ctrl
-use SIS_debugging,      only : hchksum, Bchksum, uchksum, vchksum
+use SIS_debugging,      only : hchksum, Bchksum, uchksum, vchksum, hchksum_pair
 use SIS_debugging,      only : check_redundant_B, vec_chksum_A, vec_chksum_B, vec_chksum_C
 use SIS_hor_grid,       only : SIS_hor_grid_type
 
@@ -302,10 +302,9 @@ subroutine ice_grid_chksum(G, haloshift)
   call hchksum(G%mask2dT, "G%mask2dT", G%HI, haloshift=hs)
   call hchksum(G%geoLatT, "G%geoLatT", G%HI, haloshift=hs)
   call hchksum(G%geoLonT, "G%geoLonT", G%HI, haloshift=hs)
-  call hchksum(G%dxT, "G%dxT", G%HI, haloshift=hs)
-  call hchksum(G%IdxT, "G%IdxT", G%HI, haloshift=hs)
-  call hchksum(G%IdyT, "G%IdyT", G%HI, haloshift=hs)
-  call hchksum(G%dyT, "G%dyT", G%HI, haloshift=hs)
+  call hchksum_pair(G%dxT, "G%dxT", G%dyT, "G%dyT", G%HI, haloshift=hs)
+  call hchksum_pair(G%IdxT, "G%IdxT", G%IdyT, "G%IdyT", G%HI, haloshift=hs)
+
   call hchksum(G%areaT, "G%areaT", G%HI, haloshift=hs)
   call hchksum(G%IareaT, "G%IareaT", G%HI, haloshift=hs)
   call hchksum(G%mask2dT, "G%mask2dT", G%HI, haloshift=hs)

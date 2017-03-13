@@ -39,7 +39,7 @@
 module ice_model_mod
 
 use SIS_debugging,     only : chksum, hchksum, qchksum, uchksum, vchksum, Bchksum, SIS_debugging_init
-use SIS_debugging,     only : uvchksum_pair
+use SIS_debugging,     only : uvchksum_pair, hchksum_pair
 use SIS_diag_mediator, only : set_SIS_axes_info, SIS_diag_mediator_init, SIS_diag_mediator_end
 use SIS_diag_mediator, only : enable_SIS_averaging, disable_SIS_averaging
 use SIS_diag_mediator, only : post_SIS_data, post_data=>post_SIS_data
@@ -64,7 +64,7 @@ use MOM_string_functions, only : uppercase
 use MOM_time_manager, only : time_type, time_type_to_real, real_to_time_type
 use MOM_time_manager, only : set_date, set_time, operator(+), operator(-)
 use MOM_time_manager, only : operator(>), operator(*), operator(/), operator(/=)
-use MOM_transform_test, only : MOM_transform_test_init, do_transform_on_this_pe
+use MOM_transform_test, only : MOM_transform_test_init, do_transform_on_this_pe, transform
 
 use fms_mod, only : file_exist, clock_flag_default
 use fms_io_mod, only : set_domain, nullify_domain, restore_state, query_initialized
@@ -1571,7 +1571,8 @@ subroutine ice_model_init(Ice, Time_Init, Time, Time_step_fast, Time_step_slow, 
   !
   type(dyn_horgrid_type), pointer :: dG_untrans => NULL()
   type(SIS_hor_grid_type), pointer :: sG_untrans => NULL()
-  type(hor_index_type)  :: sHI_untrans
+  type(hor_index_type)  :: sHI_untrans, fHI_untrans
+  type(MOM_domain_type), pointer :: domain_untrans => NULL()
 
   ! Parameters that are read in and used to initialize other modules.  If those
   ! other modules had control states, these would be moved to those modules.
@@ -1664,6 +1665,8 @@ subroutine ice_model_init(Ice, Time_Init, Time, Time_step_fast, Time_step_slow, 
   logical :: split_restart_files
   logical :: is_restart = .false.
   character(len=16)  :: stagger, dflt_stagger
+  real, dimension(:, :), allocatable :: tmpA, tmpC
+  real, dimension(:, :, :), allocatable :: tmpB
 
   ! ### These are just here to keep the order of SIS_parameter_doc.
   logical :: column_check
@@ -1966,13 +1969,11 @@ subroutine ice_model_init(Ice, Time_Init, Time, Time_step_fast, Time_step_slow, 
     call clone_MOM_domain(sGD, dG%Domain)
 
     ! Set the bathymetry, Coriolis parameter, open channel widths and masks.
-
     if (do_transform_on_this_pe()) then
       call create_dyn_horgrid_untrans(dG_untrans, sHI_untrans, param_file)
       call SIS_initialize_fixed(dG_untrans, param_file, &
                                 write_geom_files, dirs%output_directory)
       call transform_init_dyn_horgrid(dG_untrans, dG)
-
     else
       call SIS_initialize_fixed(dG, param_file, write_geom_files, &
                                 dirs%output_directory)
@@ -1988,8 +1989,8 @@ subroutine ice_model_init(Ice, Time_Init, Time, Time_step_fast, Time_step_slow, 
       call qchksum(dG%mask2dBu, 'SIS_initialize_fixed: mask2dBu ', dG%HI)
 
       call qchksum(dG%CoriolisBu, "SIS_initialize_fixed: f ", dG%HI)
-      call hchksum(dG%dF_dx, "SIS_initialize_fixed: dF_dx ", dG%HI)
-      call hchksum(dG%dF_dy, "SIS_initialize_fixed: dF_dy ", dG%HI)
+      call hchksum_pair(dG%dF_dx, "SIS_initialize_fixed: dF_dx ", &
+                        dG%dF_dy, "SIS_initialize_fixed: dF_dy ", dG%HI)
     endif
 
     call set_hor_grid(sG, param_file, global_indexing=global_indexing)
@@ -1999,7 +2000,8 @@ subroutine ice_model_init(Ice, Time_Init, Time, Time_step_fast, Time_step_slow, 
     ! Keep a copy of the untransformed G. This is used to initialize state.
     if (do_transform_on_this_pe()) then
       allocate(sG%self_untrans)
-      call set_hor_grid(sG_untrans, param_file, &
+      call clone_MOM_domain(dG_untrans%Domain, sG%self_untrans%Domain)
+      call set_hor_grid(sG%self_untrans, param_file, &
                         global_indexing=global_indexing)
       call copy_dyngrid_to_SIS_horgrid(dG_untrans, sG%self_untrans)
       call destroy_dyn_horgrid(dG_untrans)
@@ -2070,6 +2072,10 @@ subroutine ice_model_init(Ice, Time_Init, Time, Time_step_fast, Time_step_slow, 
     ! publicly for use by the exchange grid.
     call clone_MOM_domain(sGD, Ice%slow_domain_NH, halo_size=0, symmetric=.false., &
                           domain_name="ice_nohalo")
+    if (do_transform_on_this_pe()) then
+      call clone_MOM_domain(sG%self_untrans%Domain, Ice%slow_domain_NH_untrans, &
+                            halo_size=0, symmetric=.false., domain_name="ice_nohalo")
+    endif
 
     ! Set the computational domain sizes using the ice model's indexing convention.
     isc = sHI%isc ; iec = sHI%iec ; jsc = sHI%jsc ; jec = sHI%jec
@@ -2124,11 +2130,33 @@ subroutine ice_model_init(Ice, Time_Init, Time, Time_step_fast, Time_step_slow, 
       call clone_MOM_domain(fGD, dG%Domain)
 
       ! Set the bathymetry, Coriolis parameter, open channel widths and masks.
-      call SIS_initialize_fixed(dG, param_file, .false., dirs%output_directory)
+      if (do_transform_on_this_pe()) then
+        call MOM_domains_init(domain_untrans, param_file, symmetric=.true., &
+               domain_name="ice model fast", include_name="SIS2_memory.h", &
+               static_memory=.false., NIHALO=0, NJHALO=0, param_suffix="_FAST", &
+               transform=.false.)
 
-      call set_hor_grid(Ice%fCS%G, param_file, global_indexing=global_indexing)
-      call copy_dyngrid_to_SIS_horgrid(dG, Ice%fCS%G)
+        call create_dyn_horgrid_untrans(dG_untrans, fHI_untrans, param_file, &
+                                        domain_untrans=domain_untrans)
+        call SIS_initialize_fixed(dG_untrans, param_file, &
+                                  .false., dirs%output_directory)
+        call transform_init_dyn_horgrid(dG_untrans, dG)
+      else
+        call SIS_initialize_fixed(dG, param_file, .false., dirs%output_directory)
+      endif
+
+      call set_hor_grid(fG, param_file, global_indexing=global_indexing)
+      call copy_dyngrid_to_SIS_horgrid(dG, fG)
       call destroy_dyn_horgrid(dG)
+
+      if (do_transform_on_this_pe()) then
+        allocate(fG%self_untrans)
+        call clone_MOM_domain(dG_untrans%Domain, fG%self_untrans%Domain)
+        call set_hor_grid(fG%self_untrans, param_file, &
+                          global_indexing=global_indexing)
+        call copy_dyngrid_to_SIS_horgrid(dG_untrans, fG%self_untrans)
+        call destroy_dyn_horgrid(dG_untrans)
+      endif
     endif
 
     Ice%fCS%bounds_check = bounds_check
@@ -2199,8 +2227,12 @@ subroutine ice_model_init(Ice, Time_Init, Time, Time_step_fast, Time_step_slow, 
 
     ! Copy the ice model's domain into one with no halos that can be shared
     ! publicly for use by the exchange grid.
-    call clone_MOM_domain(Ice%fCS%G%Domain, Ice%domain, halo_size=0, &
+    call clone_MOM_domain(fGD, Ice%domain, halo_size=0, &
                           symmetric=.false., domain_name="ice_nohalo")
+    if (do_transform_on_this_pe()) then
+      call clone_MOM_domain(fG%self_untrans%domain, Ice%domain_untrans, halo_size=0, &
+                            symmetric=.false., domain_name="ice_nohalo")
+    endif
   endif
 
 
@@ -2401,9 +2433,23 @@ subroutine ice_model_init(Ice, Time_Init, Time, Time_step_fast, Time_step_slow, 
       enddo
 
       allocate(h_ice_input(sG%isc:sG%iec,sG%jsc:sG%jec))
-      call get_sea_surface(Ice%sCS%Time, Ice%sCS%OSS%SST_C(isc:iec,jsc:jec), &
-                           sIST%part_size(isc:iec,jsc:jec,0:1), &
-                           h_ice_input, ice_domain=Ice%slow_domain_NH, ts_in_K=.false. )
+      if (do_transform_on_this_pe()) then
+        allocate(tmpA(jsc:jec, isc:iec))
+        allocate(tmpB(jsc:jec, isc:iec,0:1))
+        allocate(tmpC(size(h_ice_input, 2), size(h_ice_input, 1)))
+        call get_sea_surface(Ice%sCS%Time, tmpA, tmpB, tmpC, &
+                             ice_domain=Ice%slow_domain_NH_untrans, ts_in_K=.false. )
+        call transform(tmpA, Ice%sCS%OSS%SST_C(isc:iec,jsc:jec))
+        call transform(tmpB, sIST%part_size(isc:iec,jsc:jec,0:1))
+        call transform(tmpC, h_ice_input)
+        deallocate(tmpA)
+        deallocate(tmpB)
+        deallocate(tmpC)
+      else
+        call get_sea_surface(Ice%sCS%Time, Ice%sCS%OSS%SST_C(isc:iec,jsc:jec), &
+                             sIST%part_size(isc:iec,jsc:jec,0:1), &
+                             h_ice_input, ice_domain=Ice%slow_domain_NH, ts_in_K=.false. )
+      endif
       do j=jsc,jec ; do i=isc,iec
         sIST%mH_ice(i,j,1) = h_ice_input(i,j)*(Rho_ice*sIG%kg_m2_to_H)
       enddo ; enddo

@@ -43,7 +43,9 @@ public :: Ice_public_type_chksum, Ice_public_type_bounds_check
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~!
 type ice_data_type !  ice_public_type
   type(domain2D)          :: Domain         ! A copy of the fast ice domain without halos.
+  type(domain2D)          :: Domain_untrans
   type(domain2D)          :: slow_Domain_NH ! A copy of the slow ice domain without halos.
+  type(domain2D)          :: slow_Domain_NH_untrans
   type(domain2D), pointer :: &
     fast_domain => NULL(), & ! A pointer to the fast ice mpp domain or a copy
                              ! on slow ice PEs.

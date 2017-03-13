@@ -29,6 +29,7 @@ module SIS_debugging
 
 use MOM_checksums, only : hchksum, Bchksum, uchksum, vchksum, qchksum
 use MOM_checksums, only : is_NaN, chksum, MOM_checksums_init
+use MOM_checksums, only : uvchksum_pair, hchksum_pair, Bchksum_pair
 use MOM_coms, only : PE_here, root_PE, num_PEs, sum_across_PEs
 use MOM_coms, only : min_across_PEs, max_across_PEs, reproducing_sum
 use MOM_domains, only : pass_vector, pass_var, pe_here
@@ -46,6 +47,7 @@ public :: vec_chksum, vec_chksum_C, vec_chksum_B, vec_chksum_A
 
 ! These interfaces come from MOM_checksums.
 public :: hchksum, Bchksum, uchksum, vchksum, qchksum, is_NaN, chksum
+public :: uvchksum_pair, hchksum_pair, Bchksum_pair
 
 interface check_redundant_C
   module procedure check_redundant_vC3d, check_redundant_vC2d
@@ -658,8 +660,8 @@ subroutine chksum_vec_B2d(mesg, u_comp, v_comp, G, halos, scalars, symmetric)
   are_scalars = .false. ; if (present(scalars)) are_scalars = scalars
 
   if (debug_chksums) then
-    call Bchksum(u_comp, mesg//"(u)", G%HI, halos, symmetric=symmetric)
-    call Bchksum(v_comp, mesg//"(v)", G%HI, halos, symmetric=symmetric)
+    call Bchksum_pair(u_comp, mesg//"(u)", v_comp, mesg//"(v)", &
+                      G%HI, haloshift=halos, symmetric=symmetric)
   endif
   if (debug_redundant) then
     if (are_scalars) then
@@ -713,8 +715,8 @@ subroutine chksum_vec_A2d(mesg, u_comp, v_comp, G, halos, scalars)
   are_scalars = .false. ; if (present(scalars)) are_scalars = scalars
 
   if (debug_chksums) then
-    call hchksum(u_comp, mesg//"(u)", G%HI, halos)
-    call hchksum(v_comp, mesg//"(v)", G%HI, halos)
+    call hchksum_pair(u_comp, mesg//"(u)", v_comp, mesg//"(v)", &
+                      G%HI, haloshift=halos)
   endif
   if (debug_redundant) then
     if (are_scalars) then
