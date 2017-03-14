@@ -87,6 +87,7 @@ use ice_type_mod, only : ice_model_restart, ice_stock_pe, ice_data_type_chksum
 use ice_boundary_types, only : ocean_ice_boundary_type, atmos_ice_boundary_type, land_ice_boundary_type
 use ice_boundary_types, only : ocn_ice_bnd_type_chksum, atm_ice_bnd_type_chksum
 use ice_boundary_types, only : lnd_ice_bnd_type_chksum
+use ice_boundary_types, only : transform_atmos_boundary, deallocate_atmos_boundary
 use SIS_ctrl_types, only : SIS_slow_CS, SIS_fast_CS
 use SIS_ctrl_types, only : ice_diagnostics_init, ice_diags_fast_init
 use SIS_types, only : ice_ocean_flux_type, alloc_ice_ocean_flux, dealloc_ice_ocean_flux
@@ -1186,6 +1187,7 @@ subroutine update_ice_model_fast( Atmos_boundary, Ice )
   type(atmos_ice_boundary_type),    intent(inout) :: Atmos_boundary
 
   type(time_type) :: Time_start, Time_end, dT_fast
+  type(atmos_ice_boundary_type) :: Atmos_boundary_internal
 
   call mpp_clock_begin(iceClock) ; call mpp_clock_begin(ice_clock_fast)
 
@@ -1196,10 +1198,16 @@ subroutine update_ice_model_fast( Atmos_boundary, Ice )
   Time_start = Ice%fCS%Time
   Time_end = Time_start + dT_fast
 
-  if (Ice%fCS%Rad%add_diurnal_sw) &
-    call add_diurnal_sw(Atmos_boundary, Ice%fCS%G, Time_start, Time_end)
+  !if (Ice%fCS%Rad%add_diurnal_sw) &
+  !  call add_diurnal_sw(Atmos_boundary, Ice%fCS%G, Time_start, Time_end)
 
-  call do_update_ice_model_fast(Atmos_boundary, Ice%fCS%IST, Ice%fCS%sOSS, Ice%fCS%Rad, &
+  if (do_transform_on_this_pe()) then
+    call transform_atmos_boundary(Atmos_boundary, Atmos_boundary_internal)
+  else
+    Atmos_boundary_internal = Atmos_boundary
+  endif
+
+  call do_update_ice_model_fast(Atmos_boundary_internal, Ice%fCS%IST, Ice%fCS%sOSS, Ice%fCS%Rad, &
                                 Ice%fCS%FIA, dT_fast, Ice%fCS%fast_thermo_CSp, &
                                 Ice%fCS%G, Ice%fCS%IG )
 
@@ -1208,19 +1216,23 @@ subroutine update_ice_model_fast( Atmos_boundary, Ice )
 
   Ice%Time = Ice%fCS%Time
 
-  call fast_radiation_diagnostics(Atmos_boundary, Ice, Ice%fCS%IST, Ice%fCS%Rad, &
+  call fast_radiation_diagnostics(Atmos_boundary_internal, Ice, Ice%fCS%IST, Ice%fCS%Rad, &
                                   Ice%fCS%FIA, Ice%fCS%G, Ice%fCS%IG, Ice%fCS, &
                                   Time_start, Time_end)
 
   ! Set some of the evolving ocean properties that will be seen by the
   ! atmosphere in the next time-step.
-  call set_fast_ocean_sfc_properties(Atmos_boundary, Ice, Ice%fCS%IST, Ice%fCS%Rad, &
+  call set_fast_ocean_sfc_properties(Atmos_boundary_internal, Ice, Ice%fCS%IST, Ice%fCS%Rad, &
                                      Ice%fCS%FIA, Ice%fCS%G, Ice%fCS%IG, Time_end, Time_end + dT_fast)
 
   if (Ice%fCS%debug) &
     call Ice_public_type_chksum("End do_update_ice_model_fast", Ice, check_fast=.true.)
   if (Ice%fCS%bounds_check) &
     call Ice_public_type_bounds_check(Ice, Ice%fCS%G, "End update_ice_fast")
+
+  if (do_transform_on_this_pe()) then
+    call deallocate_atmos_boundary(Atmos_boundary_internal)
+  endif
 
   call mpp_clock_end(ice_clock_fast) ; call mpp_clock_end(iceClock)
 

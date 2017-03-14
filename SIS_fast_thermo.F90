@@ -722,6 +722,8 @@ subroutine do_update_ice_model_fast(Atmos_boundary, IST, sOSS, Rad, FIA, &
     endif ; enddo ; enddo ; enddo
   endif
 
+  flux_u(:, :, :) = 0.0
+
   if (CS%debug) &
     call IST_chksum("Start do_update_ice_model_fast", IST, G, IG)
 

@@ -10,6 +10,7 @@ use coupler_types_mod, only : coupler_2d_bc_type, coupler_3d_bc_type
 use fms_mod,           only : stdout
 use mpp_mod,           only : mpp_chksum
 use mpp_parameter_mod, only : CGRID_NE, BGRID_NE, AGRID
+use MOM_transform_test, only : transform
 
 implicit none ; private
 
@@ -17,6 +18,7 @@ public :: ocean_ice_boundary_type, atmos_ice_boundary_type
 public :: land_ice_boundary_type
 public :: ocn_ice_bnd_type_chksum, atm_ice_bnd_type_chksum
 public :: lnd_ice_bnd_type_chksum
+public :: transform_atmos_boundary, deallocate_atmos_boundary
 
 !   The following three types are for data exchange with the FMS coupler
 ! they are defined here but declared in coupler_main and allocated in flux_init.
@@ -106,6 +108,103 @@ type land_ice_boundary_type
 end type land_ice_boundary_type
 
 contains
+
+#define ALLOCATE_TRANSFORMED_3D(A, B) allocate(A(size(B, 2), size(B, 1), size(B, 3)))
+
+subroutine transform_atmos_boundary(AIB, AIB_trans)
+  type(atmos_ice_boundary_type),    intent(inout) :: AIB
+  type(atmos_ice_boundary_type),    intent(inout) :: AIB_trans
+
+  ALLOCATE_TRANSFORMED_3D(AIB_trans%u_flux, AIB%u_flux)
+  ALLOCATE_TRANSFORMED_3D(AIB_trans%v_flux, AIB%v_flux)
+  ALLOCATE_TRANSFORMED_3D(AIB_trans%u_star, AIB%u_star)
+  ALLOCATE_TRANSFORMED_3D(AIB_trans%t_flux, AIB%t_flux)
+  ALLOCATE_TRANSFORMED_3D(AIB_trans%q_flux, AIB%q_flux)
+  ALLOCATE_TRANSFORMED_3D(AIB_trans%lw_flux, AIB%lw_flux)
+
+  ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_flux_vis_dir, AIB%sw_flux_vis_dir)
+  ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_flux_vis_dif, AIB%sw_flux_vis_dif)
+  ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_flux_nir_dir, AIB%sw_flux_vis_dir)
+  ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_flux_nir_dif, AIB%sw_flux_vis_dif)
+
+  ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_down_vis_dir, AIB%sw_down_vis_dir)
+  ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_down_vis_dif, AIB%sw_down_vis_dif)
+  ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_down_nir_dir, AIB%sw_down_vis_dir)
+  ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_down_nir_dif, AIB%sw_down_vis_dif)
+
+  ALLOCATE_TRANSFORMED_3D(AIB_trans%lprec, AIB%lprec)
+  ALLOCATE_TRANSFORMED_3D(AIB_trans%fprec, AIB%fprec)
+
+  ALLOCATE_TRANSFORMED_3D(AIB_trans%dhdt, AIB%dhdt)
+  ALLOCATE_TRANSFORMED_3D(AIB_trans%dedt, AIB%dedt)
+  ALLOCATE_TRANSFORMED_3D(AIB_trans%drdt, AIB%drdt)
+
+  ALLOCATE_TRANSFORMED_3D(AIB_trans%coszen, AIB%coszen)
+  ALLOCATE_TRANSFORMED_3D(AIB_trans%p, AIB%p)
+  ALLOCATE_TRANSFORMED_3D(AIB_trans%data, AIB%data)
+
+  call transform(AIB%u_flux, AIB_trans%u_flux)
+  call transform(AIB%v_flux, AIB_trans%v_flux)
+  call transform(AIB%u_star, AIB_trans%u_star)
+  call transform(AIB%t_flux, AIB_trans%t_flux)
+  call transform(AIB%q_flux, AIB_trans%q_flux)
+  call transform(AIB%lw_flux, AIB_trans%lw_flux)
+
+  call transform(AIB%sw_flux_vis_dir, AIB_trans%sw_flux_vis_dir)
+  call transform(AIB%sw_flux_vis_dif, AIB_trans%sw_flux_vis_dif)
+  call transform(AIB%sw_flux_vis_dir, AIB_trans%sw_flux_nir_dir)
+  call transform(AIB%sw_flux_vis_dif, AIB_trans%sw_flux_nir_dif)
+
+  call transform(AIB%sw_down_vis_dir, AIB_trans%sw_down_vis_dir)
+  call transform(AIB%sw_down_vis_dif, AIB_trans%sw_down_vis_dif)
+  call transform(AIB%sw_down_vis_dir, AIB_trans%sw_down_nir_dir)
+  call transform(AIB%sw_down_vis_dif, AIB_trans%sw_down_nir_dif)
+
+  call transform(AIB%lprec, AIB_trans%lprec)
+  call transform(AIB%fprec, AIB_trans%fprec)
+
+  call transform(AIB%dhdt, AIB_trans%dhdt)
+  call transform(AIB%dedt, AIB_trans%dedt)
+  call transform(AIB%drdt, AIB_trans%drdt)
+
+  call transform(AIB%coszen, AIB_trans%coszen)
+  call transform(AIB%p, AIB_trans%p)
+  call transform(AIB%data, AIB_trans%data)
+
+end subroutine transform_atmos_boundary
+
+subroutine deallocate_atmos_boundary(AIB)
+  type(atmos_ice_boundary_type),    intent(inout) :: AIB
+
+  deallocate(AIB%u_flux)
+  deallocate(AIB%v_flux)
+  deallocate(AIB%u_star)
+  deallocate(AIB%t_flux)
+  deallocate(AIB%q_flux)
+  deallocate(AIB%lw_flux)
+
+  deallocate(AIB%sw_flux_vis_dir)
+  deallocate(AIB%sw_flux_vis_dif)
+  deallocate(AIB%sw_flux_vis_dir)
+  deallocate(AIB%sw_flux_vis_dif)
+
+  deallocate(AIB%sw_down_vis_dir)
+  deallocate(AIB%sw_down_vis_dif)
+  deallocate(AIB%sw_down_vis_dir)
+  deallocate(AIB%sw_down_vis_dif)
+
+  deallocate(AIB%lprec)
+  deallocate(AIB%fprec)
+
+  deallocate(AIB%dhdt)
+  deallocate(AIB%dedt)
+  deallocate(AIB%drdt)
+
+  deallocate(AIB%coszen)
+  deallocate(AIB%p)
+  deallocate(AIB%data)
+
+end subroutine deallocate_atmos_boundary
 
 subroutine ocn_ice_bnd_type_chksum(id, timestep, bnd_type)
 
