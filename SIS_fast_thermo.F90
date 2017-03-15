@@ -49,7 +49,7 @@ use MOM_time_manager, only : operator(>), operator(*), operator(/), operator(/=)
 
 use coupler_types_mod, only : coupler_3d_bc_type
 
-use SIS_types, only : ice_state_type, IST_chksum, IST_bounds_check
+use SIS_types, only : ice_state_type, IST_chksum, IST_bounds_check, FIA_chksum
 use SIS_types, only : fast_ice_avg_type, ice_rad_type, simple_OSS_type, total_sfc_flux_type
 use SIS_types, only : VIS_DIR, VIS_DIF, NIR_DIR, NIR_DIF
 
@@ -187,6 +187,8 @@ subroutine sum_top_quantities (FIA, ABT, flux_u, flux_v, flux_sh, evap, &
     if (FIA%num_tr_fluxes > 0) FIA%tr_flux_top(:,:,:,:) = 0.0
   endif
 
+  call FIA_chksum("sum_top_quantities", FIA, G, check_ocean=.true.)
+
   !$OMP parallel do default(shared)
   do j=jsc,jec ; do k=0,ncat ; do i=isc,iec
     FIA%flux_u_top(i,j,k)  = FIA%flux_u_top(i,j,k)  + flux_u(i,j,k)
@@ -201,6 +203,8 @@ subroutine sum_top_quantities (FIA, ABT, flux_u, flux_v, flux_sh, evap, &
   enddo ; enddo ; enddo
   ! FIA%flux_sw_dn is accumulated where the fast radiation diagnostics are output
   ! because it depends on arrays that are stored in the public ice_data_type.
+
+  call FIA_chksum("sum_top_quantities", FIA, G, check_ocean=.true.)
 
   ind = 0
   do n=1,ABT%fluxes%num_bcs ; do m=1,ABT%fluxes%bc(n)%num_fields
@@ -760,21 +764,37 @@ subroutine do_update_ice_model_fast(Atmos_boundary, IST, sOSS, Rad, FIA, &
     enddo ; enddo
   enddo
 
+  call hchksum(evap(:,:,1:), "Mid do_fast evap", G%HI)
+  call hchksum(evap(:,:,0), "Mid do_fast evap", G%HI)
+  call hchksum(Atmos_boundary%q_flux(:,:,1:), "Mid do_fast flux_q", G%HI)
+  call hchksum(Atmos_boundary%q_flux(:,:,0), "Mid do_fast flux_q", G%HI)
+
+  call hchksum(flux_u(:,:,1:), "Mid do_fast flux_u", G%HI)
+  call hchksum(Atmos_boundary%u_flux(:,:,1:), "Mid do_fast flux_u", G%HI)
+  call hchksum(Atmos_boundary%u_flux(:,:,0), "Mid do_fast flux_u", G%HI)
+  call hchksum(flux_u(:,:,0), "Mid do_fast flux_u", G%HI)
+
+
+  call hchksum(flux_sh(:,:,1:), "Mid do_fast flux_sh", G%HI)
+  call hchksum(Atmos_boundary%t_flux(:,:,1:), "Mid do_fast flux_sh", G%HI)
+  call hchksum(Atmos_boundary%t_flux(:,:,0), "Mid do_fast flux_sh", G%HI)
+  call hchksum(flux_sh(:,:,0), "Mid do_fast flux_sh", G%HI)
+
   if (CS%debug) then
     call hchksum(flux_u(:,:,1:), "Mid do_fast flux_u", G%HI)
     call hchksum(flux_v(:,:,1:), "Mid do_fast flux_v", G%HI)
     call hchksum(flux_sh(:,:,1:), "Mid do_fast flux_sh", G%HI)
     call hchksum(evap(:,:,1:), "Mid do_fast evap", G%HI)
     call hchksum(flux_lw(:,:,1:), "Mid do_fast flux_lw", G%HI)
+    call hchksum(lprec(:,:,1:), "Mid do_fast lprec", G%HI)
+    call hchksum(fprec(:,:,1:), "Mid do_fast fprec", G%HI)
+    call hchksum(dshdt(:,:,2:), "Mid do_fast dshdt", G%HI)
+    call hchksum(devapdt(:,:,1:), "Mid do_fast devapdt", G%HI)
+    call hchksum(dlwdt(:,:,1:), "Mid do_fast dlwdt", G%HI)
     call hchksum(flux_sw(:,:,1:,nir_dir), "Mid do_fast flux_sw_nir_dir", G%HI)
     call hchksum(flux_sw(:,:,1:,nir_dif), "Mid do_fast flux_sw_nir_dif", G%HI)
     call hchksum(flux_sw(:,:,1:,vis_dir), "Mid do_fast flux_sw_vis_dir", G%HI)
     call hchksum(flux_sw(:,:,1:,vis_dif), "Mid do_fast flux_sw_vis_dif", G%HI)
-    call hchksum(lprec(:,:,1:), "Mid do_fast lprec", G%HI)
-    call hchksum(fprec(:,:,1:), "Mid do_fast fprec", G%HI)
-    call hchksum(dshdt(:,:,1:), "Mid do_fast dshdt", G%HI)
-    call hchksum(devapdt(:,:,1:), "Mid do_fast devapdt", G%HI)
-    call hchksum(dlwdt(:,:,1:), "Mid do_fast dlwdt", G%HI)
   endif
 
   call get_SIS2_thermo_coefs(IST%ITV, ice_salinity=S_col, enthalpy_units=enth_units, &
@@ -890,6 +910,9 @@ subroutine do_update_ice_model_fast(Atmos_boundary, IST, sOSS, Rad, FIA, &
       flux_lh(i,j,k) = LatHtVap * evap(i,j,k)
     endif
   enddo ; enddo ; enddo
+
+  call hchksum(flux_sh(:,:,1:), "Mid do_fast flux_sh", G%HI)
+  call hchksum(flux_sh(:,:,0), "Mid do_fast flux_sh", G%HI)
 
   call sum_top_quantities(FIA, Atmos_boundary, flux_u, flux_v, flux_sh, evap, &
                           flux_sw, flux_lw, lprec, fprec, flux_lh, Rad%t_skin, sOSS%SST_C, &

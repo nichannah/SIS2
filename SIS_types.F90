@@ -2002,7 +2002,7 @@ end subroutine IOF_chksum
 subroutine FIA_chksum(mesg, FIA, G, check_ocean)
   character(len=*),        intent(in) :: mesg  !< A message that appears on the chksum lines.
   type(fast_ice_avg_type), intent(in) :: FIA   !< The structure whose arrays are being checksummed.
-  type(SIS_hor_grid_type), intent(inout) :: G  !< The ice-model's horizonal grid type.
+  type(SIS_hor_grid_type), intent(in) :: G  !< The ice-model's horizonal grid type.
   logical, optional,       intent(in) :: check_ocean !< If present and true, check the fluxes to the ocean.
 
   call hchksum(FIA%flux_sh_top(:,:,1:), trim(mesg)//" FIA%flux_sh_top", G%HI)

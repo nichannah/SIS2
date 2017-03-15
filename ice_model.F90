@@ -88,6 +88,7 @@ use ice_boundary_types, only : ocean_ice_boundary_type, atmos_ice_boundary_type,
 use ice_boundary_types, only : ocn_ice_bnd_type_chksum, atm_ice_bnd_type_chksum
 use ice_boundary_types, only : lnd_ice_bnd_type_chksum
 use ice_boundary_types, only : transform_atmos_boundary, deallocate_atmos_boundary
+use ice_boundary_types, only : transform_land_boundary, deallocate_land_boundary
 use SIS_ctrl_types, only : SIS_slow_CS, SIS_fast_CS
 use SIS_ctrl_types, only : ice_diagnostics_init, ice_diags_fast_init
 use SIS_types, only : ice_ocean_flux_type, alloc_ice_ocean_flux, dealloc_ice_ocean_flux
@@ -221,7 +222,7 @@ subroutine update_ice_model_slow(Ice)
 
   if (Ice%sCS%debug) then
     call Ice_public_type_chksum("Start update_ice_model_slow", Ice, check_slow=.true.)
-    call FIA_chksum("Start update_ice_model_slow", FIA, sG)
+    call FIA_chksum("Start update_ice_model_slow", FIA, sG, check_ocean=.true.)
     call IOF_chksum("Start update_ice_model_slow", Ice%sCS%IOF, sG)
   endif
 
@@ -274,6 +275,7 @@ subroutine update_ice_model_slow(Ice)
   if (Ice%sCS%debug) then
     call Ice_public_type_chksum("Before slow_thermodynamics", Ice, check_slow=.true.)
     call IOF_chksum("Before slow_thermodynamics", Ice%sCS%IOF, sG)
+    call FIA_chksum("After update_icebergs", FIA, sG, check_ocean=.true.)
   endif
 
   call slow_thermodynamics(sIST, dt_slow, Ice%sCS%slow_thermo_CSp, &
@@ -361,6 +363,8 @@ subroutine unpack_land_ice_boundary(Ice, LIB)
   type(fast_ice_avg_type), pointer :: FIA => NULL()
   type(SIS_hor_grid_type), pointer :: G => NULL()
 
+  type(land_ice_boundary_type)     :: LIB_internal
+
   integer :: i, j, k, m, n, i2, j2, k2, isc, iec, jsc, jec, i_off, j_off
 
   if (.not.associated(Ice%fCS)) call SIS_error(FATAL, &
@@ -370,20 +374,26 @@ subroutine unpack_land_ice_boundary(Ice, LIB)
   if (.not.associated(Ice%fCS%G)) call SIS_error(FATAL, &
       "The pointer to Ice%fCS%G must be associated in unpack_land_ice_boundary.")
 
+  if (do_transform_on_this_pe()) then
+    call transform_land_boundary(LIB, LIB_internal)
+  else
+    LIB_internal = LIB
+  endif
+
   FIA => Ice%fCS%FIA ; G => Ice%fCS%G
 
   isc = G%isc ; iec = G%iec ; jsc = G%jsc ; jec = G%jec
 
   ! Store liquid runoff and other fluxes from the land to the ice or ocean.
-  i_off = LBOUND(LIB%runoff,1) - G%isc ; j_off = LBOUND(LIB%runoff,2) - G%jsc
+  i_off = LBOUND(LIB_internal%runoff,1) - G%isc ; j_off = LBOUND(LIB_internal%runoff,2) - G%jsc
 !$OMP parallel do default(none) shared(isc,iec,jsc,jec,FIA,LIB,i_off,j_off,G) &
 !$OMP                          private(i2,j2)
   do j=jsc,jec ; do i=isc,iec ; if (G%mask2dT(i,j) > 0.0) then
     i2 = i+i_off ; j2 = j+j_off
-    FIA%runoff(i,j)  = LIB%runoff(i2,j2)
-    FIA%calving(i,j) = LIB%calving(i2,j2)
-    FIA%runoff_hflx(i,j)  = LIB%runoff_hflx(i2,j2)
-    FIA%calving_hflx(i,j) = LIB%calving_hflx(i2,j2)
+    FIA%runoff(i,j)  = LIB_internal%runoff(i2,j2)
+    FIA%calving(i,j) = LIB_internal%calving(i2,j2)
+    FIA%runoff_hflx(i,j)  = LIB_internal%runoff_hflx(i2,j2)
+    FIA%calving_hflx(i,j) = LIB_internal%calving_hflx(i2,j2)
   else
     ! This is a land point from the perspective of the sea-ice.
     ! At some point it might make sense to check for non-zero fluxes, which
@@ -395,6 +405,10 @@ subroutine unpack_land_ice_boundary(Ice, LIB)
 
   if (Ice%fCS%debug) then
     call FIA_chksum("End of unpack_land_ice_boundary", FIA, G)
+  endif
+
+  if (do_transform_on_this_pe()) then
+    call deallocate_land_boundary(LIB_internal)
   endif
 
 end subroutine unpack_land_ice_boundary
@@ -1071,6 +1085,12 @@ subroutine set_ice_surface_state(Ice, IST, OSS, Rad, FIA, G, IG, fCS)
     call chksum(Ice%v_surf(:,:,1), "Intermed Ice%v_surf(1)")
     call chksum(Ice%u_surf(:,:,2), "Intermed Ice%u_surf(2)")
     call chksum(Ice%v_surf(:,:,2), "Intermed Ice%v_surf(2)")
+
+    call hchksum(Ice%albedo_vis_dir(:,:,1:), "Intermed Ice%albedo_vis_dir", G%HI)
+    call hchksum(Ice%albedo_vis_dif(:,:,1:), "Intermed Ice%albedo_vis_dif", G%HI)
+    call hchksum(Ice%albedo_nir_dir(:,:,1:), "Intermed Ice%albedo_nir_dir", G%HI)
+    call hchksum(Ice%albedo_nir_dif(:,:,1:), "Intermed Ice%albedo_nir_dif", G%HI)
+
     call chksum(G%mask2dT(isc:iec,jsc:jec), "Intermed G%mask2dT")
 !   if (allocated(OSS%u_ocn_C)) &
 !     call uchksum(OSS%u_ocn_C, "OSS%u_ocn_C", G%HI, haloshift=1)

@@ -80,6 +80,8 @@ use SIS_tracer_flow_control, only : SIS_tracer_flow_control_CS
 use SIS_tracer_registry, only : SIS_unpack_passive_ice_tr, SIS_repack_passive_ice_tr
 use SIS_tracer_registry, only : SIS_count_passive_tracers
 
+use SIS_debugging,   only : chksum, Bchksum, hchksum, uchksum, vchksum
+
 implicit none ; private
 
 #include <SIS2_memory.h>
@@ -333,6 +335,8 @@ subroutine slow_thermodynamics(IST, dt_slow, CS, OSS, FIA, XSF, IOF, G, IG)
 
   CS%n_calls = CS%n_calls + 1
 
+  call hchksum(FIA%flux_sh_top(:, :, 0), "  FIA%flux_sh_ocn_top", G%HI)
+
   if (CS%debug) then
     call IST_chksum("Start update_ice_model_slow", IST, G, IG)
   endif
@@ -382,6 +386,8 @@ subroutine slow_thermodynamics(IST, dt_slow, CS, OSS, FIA, XSF, IOF, G, IG)
     enddo ; enddo
 
   endif
+
+  call hchksum(IOF%flux_sh_ocn_top, "  IOF%flux_sh_ocn_top", G%HI)
 
   ! IOF must be updated regardless of whether the ice is specified or the prognostic model
   ! is being used
@@ -445,9 +451,13 @@ subroutine slow_thermodynamics(IST, dt_slow, CS, OSS, FIA, XSF, IOF, G, IG)
     IOF%Enth_Mass_in_ocn(i,j) = 0.0 ; IOF%Enth_Mass_out_ocn(i,j) = 0.0
   enddo ; enddo
 
+  call hchksum(IOF%flux_sh_ocn_top, "  IOF%flux_sh_ocn_top", G%HI)
+
   ! The thermodynamics routines return updated values of the ice and snow
   ! masses-per-unit area and enthalpies.
   call SIS2_thermodynamics(IST, dt_slow, CS, OSS, FIA, IOF, G, IG)
+
+  call hchksum(IOF%flux_sh_ocn_top, "  IOF%flux_sh_ocn_top", G%HI)
 
   !TOM> calculate partial ice growth for ridging and aging.
   if (CS%do_ridging) then
@@ -462,6 +472,8 @@ subroutine slow_thermodynamics(IST, dt_slow, CS, OSS, FIA, XSF, IOF, G, IG)
     enddo ; enddo ; enddo
   endif
 
+  call hchksum(IOF%flux_sh_ocn_top, "  IOF%flux_sh_ocn_top", G%HI)
+
   !  Other routines that do thermodynamic vertical processes should be added here
 
   ! Do tracer column physics
@@ -470,6 +482,8 @@ subroutine slow_thermodynamics(IST, dt_slow, CS, OSS, FIA, XSF, IOF, G, IG)
   call disable_SIS_averaging(CS%diag)
 
   call accumulate_bottom_input(IST, OSS, FIA, IOF, dt_slow, G, IG, CS%sum_output_CSp)
+
+  call hchksum(IOF%flux_sh_ocn_top, "  IOF%flux_sh_ocn_top", G%HI)
 
   ! This needs to go after accumulate_bottom_input.
   if (associated(XSF)) call add_excess_fluxes(IOF, XSF, G)
@@ -793,9 +807,14 @@ subroutine SIS2_thermodynamics(IST, dt_slow, CS, OSS, FIA, IOF, G, IG)
   enddo ; enddo ; enddo
 !$OMP end parallel
 
+  call hchksum(FIA%flux_sh_top(:, :, 0), "  FIA%flux_sh_ocn_top", G%HI)
+  call hchksum(IOF%flux_sh_ocn_top, "  IOF%flux_sh_ocn_top", G%HI)
+
   ! Set up temporary tracer array
   npassive = SIS_count_passive_tracers(IST%TrReg)
   if(npassive>0) allocate(TrLay(0:NkIce+1,npassive))
+
+  call hchksum(IOF%flux_sh_ocn_top, "  IOF%flux_sh_ocn_top", G%HI)
 
 !$OMP parallel do default(none) shared(isc,iec,jsc,jec,ncat,G,IST,S_col0,NkIce,S_col, &
 !$OMP                                  dt_slow,snow_to_ice,heat_in,I_NK,enth_units,   &
@@ -938,6 +957,8 @@ subroutine SIS2_thermodynamics(IST, dt_slow, CS, OSS, FIA, IOF, G, IG)
 
     endif ! Applying surface fluxes to each category.
   enddo ; enddo ; enddo
+
+  call hchksum(IOF%flux_sh_ocn_top, "  IOF%flux_sh_ocn_top", G%HI)
 
 !$OMP parallel do default(none) shared(isc,iec,jsc,jec,ncat,npassive,G,IG,IST,S_col0,NkIce,S_col, &
 !$OMP                                  dt_slow,snow_to_ice,heat_in,I_NK,enth_units,   &
@@ -1106,6 +1127,8 @@ subroutine SIS2_thermodynamics(IST, dt_slow, CS, OSS, FIA, IOF, G, IG)
 
   endif ; enddo ; enddo   ! frazil>0, i-, and j-loops
 
+  call hchksum(IOF%flux_sh_ocn_top, "  IOF%flux_sh_ocn_top", G%HI)
+
   call mpp_clock_end(iceClock5)
 
   call mpp_clock_begin(iceClock6)
@@ -1267,6 +1290,8 @@ subroutine SIS2_thermodynamics(IST, dt_slow, CS, OSS, FIA, IOF, G, IG)
   do j=jsc,jec ; do i=isc,iec
     IOF%lprec_ocn_top(i,j) = IOF%lprec_ocn_top(i,j) + net_melt(i,j)
   enddo ; enddo
+
+  call hchksum(IOF%flux_sh_ocn_top, "  IOF%flux_sh_ocn_top", G%HI)
 
   ! Make sure TrLay is no longer allocated
   if(allocated(TrLay)) deallocate(TrLay)

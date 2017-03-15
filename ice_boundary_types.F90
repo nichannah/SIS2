@@ -19,6 +19,7 @@ public :: land_ice_boundary_type
 public :: ocn_ice_bnd_type_chksum, atm_ice_bnd_type_chksum
 public :: lnd_ice_bnd_type_chksum
 public :: transform_atmos_boundary, deallocate_atmos_boundary
+public :: transform_land_boundary, deallocate_land_boundary
 
 !   The following three types are for data exchange with the FMS coupler
 ! they are defined here but declared in coupler_main and allocated in flux_init.
@@ -110,6 +111,7 @@ end type land_ice_boundary_type
 contains
 
 #define ALLOCATE_TRANSFORMED_3D(A, B) allocate(A(size(B, 2), size(B, 1), size(B, 3)))
+#define ALLOCATE_TRANSFORMED_2D(A, B) allocate(A(size(B, 2), size(B, 1)))
 
 subroutine transform_atmos_boundary(AIB, AIB_trans)
   type(atmos_ice_boundary_type),    intent(inout) :: AIB
@@ -124,13 +126,17 @@ subroutine transform_atmos_boundary(AIB, AIB_trans)
 
   ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_flux_vis_dir, AIB%sw_flux_vis_dir)
   ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_flux_vis_dif, AIB%sw_flux_vis_dif)
-  ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_flux_nir_dir, AIB%sw_flux_vis_dir)
-  ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_flux_nir_dif, AIB%sw_flux_vis_dif)
+  ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_flux_nir_dir, AIB%sw_flux_nir_dir)
+  ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_flux_nir_dif, AIB%sw_flux_nir_dif)
 
-  ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_down_vis_dir, AIB%sw_down_vis_dir)
-  ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_down_vis_dif, AIB%sw_down_vis_dif)
-  ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_down_nir_dir, AIB%sw_down_vis_dir)
-  ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_down_nir_dif, AIB%sw_down_vis_dif)
+  if (associated(AIB%sw_down_vis_dir)) &
+    ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_down_vis_dir, AIB%sw_down_vis_dir)
+  if (associated(AIB%sw_down_vis_dif)) &
+    ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_down_vis_dif, AIB%sw_down_vis_dif)
+  if (associated(AIB%sw_down_nir_dir)) &
+    ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_down_nir_dir, AIB%sw_down_nir_dir)
+  if (associated(AIB%sw_down_nir_dir)) &
+   ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_down_nir_dif, AIB%sw_down_nir_dif)
 
   ALLOCATE_TRANSFORMED_3D(AIB_trans%lprec, AIB%lprec)
   ALLOCATE_TRANSFORMED_3D(AIB_trans%fprec, AIB%fprec)
@@ -141,7 +147,8 @@ subroutine transform_atmos_boundary(AIB, AIB_trans)
 
   ALLOCATE_TRANSFORMED_3D(AIB_trans%coszen, AIB%coszen)
   ALLOCATE_TRANSFORMED_3D(AIB_trans%p, AIB%p)
-  ALLOCATE_TRANSFORMED_3D(AIB_trans%data, AIB%data)
+  if (associated(AIB%data)) &
+    ALLOCATE_TRANSFORMED_3D(AIB_trans%data, AIB%data)
 
   call transform(AIB%u_flux, AIB_trans%u_flux)
   call transform(AIB%v_flux, AIB_trans%v_flux)
@@ -152,13 +159,17 @@ subroutine transform_atmos_boundary(AIB, AIB_trans)
 
   call transform(AIB%sw_flux_vis_dir, AIB_trans%sw_flux_vis_dir)
   call transform(AIB%sw_flux_vis_dif, AIB_trans%sw_flux_vis_dif)
-  call transform(AIB%sw_flux_vis_dir, AIB_trans%sw_flux_nir_dir)
-  call transform(AIB%sw_flux_vis_dif, AIB_trans%sw_flux_nir_dif)
+  call transform(AIB%sw_flux_nir_dir, AIB_trans%sw_flux_nir_dir)
+  call transform(AIB%sw_flux_nir_dif, AIB_trans%sw_flux_nir_dif)
 
-  call transform(AIB%sw_down_vis_dir, AIB_trans%sw_down_vis_dir)
-  call transform(AIB%sw_down_vis_dif, AIB_trans%sw_down_vis_dif)
-  call transform(AIB%sw_down_vis_dir, AIB_trans%sw_down_nir_dir)
-  call transform(AIB%sw_down_vis_dif, AIB_trans%sw_down_nir_dif)
+  if (associated(AIB%sw_down_vis_dir)) &
+    call transform(AIB%sw_down_vis_dir, AIB_trans%sw_down_vis_dir)
+  if (associated(AIB%sw_down_vis_dif)) &
+    call transform(AIB%sw_down_vis_dif, AIB_trans%sw_down_vis_dif)
+  if (associated(AIB%sw_down_nir_dir)) &
+    call transform(AIB%sw_down_nir_dir, AIB_trans%sw_down_nir_dir)
+  if (associated(AIB%sw_down_nir_dif)) &
+    call transform(AIB%sw_down_nir_dif, AIB_trans%sw_down_nir_dif)
 
   call transform(AIB%lprec, AIB_trans%lprec)
   call transform(AIB%fprec, AIB_trans%fprec)
@@ -169,7 +180,8 @@ subroutine transform_atmos_boundary(AIB, AIB_trans)
 
   call transform(AIB%coszen, AIB_trans%coszen)
   call transform(AIB%p, AIB_trans%p)
-  call transform(AIB%data, AIB_trans%data)
+  if (associated(AIB%data)) &
+    call transform(AIB%data, AIB_trans%data)
 
 end subroutine transform_atmos_boundary
 
@@ -185,13 +197,17 @@ subroutine deallocate_atmos_boundary(AIB)
 
   deallocate(AIB%sw_flux_vis_dir)
   deallocate(AIB%sw_flux_vis_dif)
-  deallocate(AIB%sw_flux_vis_dir)
-  deallocate(AIB%sw_flux_vis_dif)
+  deallocate(AIB%sw_flux_nir_dir)
+  deallocate(AIB%sw_flux_nir_dif)
 
-  deallocate(AIB%sw_down_vis_dir)
-  deallocate(AIB%sw_down_vis_dif)
-  deallocate(AIB%sw_down_vis_dir)
-  deallocate(AIB%sw_down_vis_dif)
+  if (associated(AIB%sw_down_vis_dir)) &
+    deallocate(AIB%sw_down_vis_dir)
+  if (associated(AIB%sw_down_vis_dif)) &
+    deallocate(AIB%sw_down_vis_dif)
+  if (associated(AIB%sw_down_nir_dir)) &
+    deallocate(AIB%sw_down_nir_dir)
+  if (associated(AIB%sw_down_nir_dif)) &
+    deallocate(AIB%sw_down_nir_dif)
 
   deallocate(AIB%lprec)
   deallocate(AIB%fprec)
@@ -202,9 +218,36 @@ subroutine deallocate_atmos_boundary(AIB)
 
   deallocate(AIB%coszen)
   deallocate(AIB%p)
-  deallocate(AIB%data)
+  if (associated(AIB%data)) &
+    deallocate(AIB%data)
 
 end subroutine deallocate_atmos_boundary
+
+subroutine transform_land_boundary(LIB, LIB_trans)
+  type(land_ice_boundary_type),    intent(in) :: LIB
+  type(land_ice_boundary_type),    intent(inout) :: LIB_trans
+
+  ALLOCATE_TRANSFORMED_2D(LIB_trans%runoff, LIB%runoff)
+  ALLOCATE_TRANSFORMED_2D(LIB_trans%calving, LIB%calving)
+  ALLOCATE_TRANSFORMED_2D(LIB_trans%runoff_hflx, LIB%runoff_hflx)
+  ALLOCATE_TRANSFORMED_2D(LIB_trans%calving_hflx, LIB%calving_hflx)
+
+  call transform(LIB%runoff, LIB_trans%runoff)
+  call transform(LIB%calving, LIB_trans%calving)
+  call transform(LIB%runoff_hflx, LIB_trans%runoff_hflx)
+  call transform(LIB%calving_hflx, LIB_trans%calving_hflx)
+
+end subroutine transform_land_boundary
+
+subroutine deallocate_land_boundary(LIB)
+  type(land_ice_boundary_type),    intent(inout) :: LIB
+
+  deallocate(LIB%runoff)
+  deallocate(LIB%calving)
+  deallocate(LIB%runoff_hflx)
+  deallocate(LIB%calving_hflx)
+
+end subroutine deallocate_land_boundary
 
 subroutine ocn_ice_bnd_type_chksum(id, timestep, bnd_type)
 
