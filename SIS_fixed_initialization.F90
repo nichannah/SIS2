@@ -4,7 +4,7 @@ module SIS_fixed_initialization
 
 ! This file is part of SIS2. See LICENSE.md for the license.
 
-use SIS_debugging, only : hchksum, qchksum, uchksum, vchksum, chksum
+use SIS_debugging, only : hchksum, Bchksum, uvchksum, chksum
 use MOM_domains, only : pass_var
 use MOM_dyn_horgrid, only : dyn_horgrid_type
 use MOM_error_handler, only : MOM_mesg, MOM_error, FATAL, WARNING, is_root_pe
@@ -96,6 +96,7 @@ subroutine SIS_initialize_fixed(G, PF, write_geom, output_dir)
   call MOM_initialize_rotation(G%CoriolisBu, G, PF)
 !   Calculate the components of grad f (beta)
   call MOM_calculate_grad_Coriolis(G%dF_dx, G%dF_dy, G)
+
   call initialize_grid_rotation_angle(G, PF)
 
 ! Write out all of the grid data used by this run.

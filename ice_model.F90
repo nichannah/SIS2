@@ -38,8 +38,7 @@
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~!
 module ice_model_mod
 
-use SIS_debugging,     only : chksum, hchksum, qchksum, uchksum, vchksum, Bchksum, SIS_debugging_init
-use SIS_debugging,     only : uvchksum_pair, hchksum_pair
+use SIS_debugging,     only : chksum, hchksum, uvchksum, Bchksum, hchksum_pair, SIS_debugging_init
 use SIS_diag_mediator, only : set_SIS_axes_info, SIS_diag_mediator_init, SIS_diag_mediator_end
 use SIS_diag_mediator, only : enable_SIS_averaging, disable_SIS_averaging
 use SIS_diag_mediator, only : post_SIS_data, post_data=>post_SIS_data
@@ -117,7 +116,6 @@ use SIS_tracer_registry, only : register_SIS_tracer, register_SIS_tracer_pair
 use SIS_tracer_flow_control, only : SIS_call_tracer_register, SIS_tracer_flow_control_init
 use SIS_tracer_flow_control, only : SIS_tracer_flow_control_end
 
-use ice_thm_mod,     only : slab_ice_optics
 use SIS_dyn_trans,   only : SIS_dynamics_trans, update_icebergs
 use SIS_dyn_trans,   only : SIS_dyn_trans_register_restarts, SIS_dyn_trans_init, SIS_dyn_trans_end
 use SIS_dyn_trans,   only : SIS_dyn_trans_transport_CS, SIS_dyn_trans_sum_output_CS
@@ -125,7 +123,7 @@ use SIS_slow_thermo, only : slow_thermodynamics, SIS_slow_thermo_init, SIS_slow_
 use SIS_slow_thermo, only : SIS_slow_thermo_set_ptrs
 use SIS_fast_thermo, only : accumulate_deposition_fluxes, convert_frost_to_snow
 use SIS_fast_thermo, only : do_update_ice_model_fast, avg_top_quantities, total_top_quantities
-use SIS_fast_thermo, only : redo_update_ice_model_fast, rescale_shortwave, find_excess_fluxes
+use SIS_fast_thermo, only : redo_update_ice_model_fast, find_excess_fluxes
 use SIS_fast_thermo, only : infill_array, SIS_fast_thermo_init, SIS_fast_thermo_end
 use SIS_optics,      only : ice_optics_SIS2, SIS_optics_init, SIS_optics_end, SIS_optics_CS
 use SIS2_ice_thm,  only : ice_temp_SIS2, SIS2_ice_thm_init, SIS2_ice_thm_end
@@ -234,14 +232,9 @@ subroutine update_ice_model_slow(Ice)
   enddo ; enddo
 
   if (Ice%sCS%redo_fast_update) then
-    call set_ice_optics(sIST, Ice%sCS%sOSS, Rad%Tskin_Rad, Rad%coszen_lastrad, &
-                        Rad, sG, sIG, Ice%sCS%optics_CSp)
-
-    call rescale_shortwave(FIA, Ice%sCS%TSF, sIST%part_size, sG, sIG)
-
     call redo_update_ice_model_fast(sIST, Ice%sCS%sOSS, Ice%sCS%Rad, &
-              FIA, Ice%sCS%Time_step_slow, Ice%sCS%fast_thermo_CSp, &
-              sG, sIG)
+              FIA, Ice%sCS%TSF, Ice%sCS%optics_CSp, Ice%sCS%Time_step_slow, &
+              Ice%sCS%fast_thermo_CSp, sG, sIG)
 
     call find_excess_fluxes(FIA, Ice%sCS%TSF, Ice%sCS%XSF, sIST%part_size, &
                             sG, sIG)
@@ -997,49 +990,30 @@ subroutine set_ice_surface_state(Ice, IST, OSS, Rad, FIA, G, IG, fCS)
   call set_ocean_albedo(Ice, Rad%do_sun_angle_for_alb, G, fCS%Time, &
                         fCS%Time + dT_r, Rad%coszen_nextrad)
 
-  if (slab_ice) then
-!$OMP parallel do default(none) shared(isc,iec,jsc,jec,ncat,IST,Rad,Ice,i_off,j_off, &
-!$OMP                                  H_to_m_snow,H_to_m_ice,OSS) &
-!$OMP                          private(i2,j2,k2)
-    do j=jsc,jec ; do k=1,ncat ; do i=isc,iec ; if (IST%part_size(i,j,k) > 0.0) then
-      i2 = i+i_off ; j2 = j+j_off ; k2 = k+1
-      call slab_ice_optics(IST%mH_snow(i,j,k)*H_to_m_snow, IST%mH_ice(i,j,k)*H_to_m_ice, &
-               Rad%t_skin(i,j,k), OSS%T_fr_ocn(i,j), &
-               Ice%albedo(i2,j2,k2))
+  !$OMP parallel do default(shared) private(i2,j2,k2,sw_abs_lay)
+  do j=jsc,jec ; do k=1,ncat ; do i=isc,iec ; if (IST%part_size(i,j,k) > 0.0) then
+    i2 = i+i_off ; j2 = j+j_off ; k2 = k+1
+    call ice_optics_SIS2(IST%mH_pond(i,j,k), IST%mH_snow(i,j,k)*H_to_m_snow, &
+             IST%mH_ice(i,j,k)*H_to_m_ice, &
+             Rad%t_skin(i,j,k), OSS%T_fr_ocn(i,j), IG%NkIce, &
+             Ice%albedo_vis_dir(i2,j2,k2), Ice%albedo_vis_dif(i2,j2,k2), &
+             Ice%albedo_nir_dir(i2,j2,k2), Ice%albedo_nir_dif(i2,j2,k2), &
+             Rad%sw_abs_sfc(i,j,k),  Rad%sw_abs_snow(i,j,k), &
+             sw_abs_lay, Rad%sw_abs_ocn(i,j,k), Rad%sw_abs_int(i,j,k), &
+             fCS%optics_CSp, IST%ITV, coszen_in=Rad%coszen_nextrad(i,j))
 
-      Ice%albedo_vis_dir(i2,j2,k2) = Ice%albedo(i2,j2,k2)
-      Ice%albedo_vis_dif(i2,j2,k2) = Ice%albedo(i2,j2,k2)
-      Ice%albedo_nir_dir(i2,j2,k2) = Ice%albedo(i2,j2,k2)
-      Ice%albedo_nir_dif(i2,j2,k2) = Ice%albedo(i2,j2,k2)
-    endif ; enddo ; enddo ; enddo
-  else
-!$OMP parallel do default(none) shared(isc,iec,jsc,jec,ncat,IST,Ice,G,IG,i_off,j_off, &
-!$OMP                                  H_to_m_snow,H_to_m_ice,OSS,Rad,fCS) &
-!$OMP                          private(i2,j2,k2,sw_abs_lay)
-    do j=jsc,jec ; do k=1,ncat ; do i=isc,iec ; if (IST%part_size(i,j,k) > 0.0) then
-      i2 = i+i_off ; j2 = j+j_off ; k2 = k+1
-      call ice_optics_SIS2(IST%mH_pond(i,j,k), IST%mH_snow(i,j,k)*H_to_m_snow, &
-               IST%mH_ice(i,j,k)*H_to_m_ice, &
-               Rad%t_skin(i,j,k), OSS%T_fr_ocn(i,j), IG%NkIce, &
-               Ice%albedo_vis_dir(i2,j2,k2), Ice%albedo_vis_dif(i2,j2,k2), &
-               Ice%albedo_nir_dir(i2,j2,k2), Ice%albedo_nir_dif(i2,j2,k2), &
-               Rad%sw_abs_sfc(i,j,k),  Rad%sw_abs_snow(i,j,k), &
-               sw_abs_lay, Rad%sw_abs_ocn(i,j,k), Rad%sw_abs_int(i,j,k), &
-               fCS%optics_CSp, IST%ITV, coszen_in=Rad%coszen_nextrad(i,j))
+    do m=1,IG%NkIce ; Rad%sw_abs_ice(i,j,k,m) = sw_abs_lay(m) ; enddo
 
-      do m=1,IG%NkIce ; Rad%sw_abs_ice(i,j,k,m) = sw_abs_lay(m) ; enddo
+    !Niki: Is the following correct for diagnostics?
+    !   Probably this calculation of the "average" albedo should be replaced
+    ! with a calculation that weights the averaging by the fraction of the
+    ! shortwave radiation in each wavelength and orientation band.  However,
+    ! since this is only used for diagnostic purposes, making this change
+    ! might not be too urgent. -RWH
+    Ice%albedo(i2,j2,k2) = (Ice%albedo_vis_dir(i2,j2,k2)+Ice%albedo_nir_dir(i2,j2,k2)&
+                      +Ice%albedo_vis_dif(i2,j2,k2)+Ice%albedo_nir_dif(i2,j2,k2))/4
 
-      !Niki: Is the following correct for diagnostics?
-      !   Probably this calculation of the "average" albedo should be replaced
-      ! with a calculation that weights the averaging by the fraction of the
-      ! shortwave radiation in each wavelength and orientation band.  However,
-      ! since this is only used for diagnostic purposes, making this change
-      ! might not be too urgent. -RWH
-      Ice%albedo(i2,j2,k2) = (Ice%albedo_vis_dir(i2,j2,k2)+Ice%albedo_nir_dir(i2,j2,k2)&
-                        +Ice%albedo_vis_dif(i2,j2,k2)+Ice%albedo_nir_dif(i2,j2,k2))/4
-
-    endif ; enddo ; enddo ; enddo
-  endif
+  endif ; enddo ; enddo ; enddo
   
   !$OMP parallel do default(shared)
   do j=jsc,jec
@@ -1092,10 +1066,9 @@ subroutine set_ice_surface_state(Ice, IST, OSS, Rad, FIA, G, IG, fCS)
     call hchksum(Ice%albedo_nir_dif(:,:,1:), "Intermed Ice%albedo_nir_dif", G%HI)
 
     call chksum(G%mask2dT(isc:iec,jsc:jec), "Intermed G%mask2dT")
-!   if (allocated(OSS%u_ocn_C)) &
-!     call uchksum(OSS%u_ocn_C, "OSS%u_ocn_C", G%HI, haloshift=1)
-!   if (allocated(OSS%v_ocn_C)) &
-!     call vchksum(OSS%v_ocn_C, "OSS%v_ocn_C", G%HI, haloshift=1)
+!   if (allocated(OSS%u_ocn_C) .and. allocated(OSS%v_ocn_C)) &
+!     call uvchksum(OSS%u_ocn_C, "OSS%u_ocn_C", &
+!                   OSS%v_ocn_C, "OSS%v_ocn_C", G%HI, haloshift=1)
 !   if (allocated(OSS%u_ocn_B)) &
 !     call Bchksum(OSS%u_ocn_B, "OSS%u_ocn_B", G%HI, haloshift=1)
 !   if (allocated(OSS%v_ocn_B)) &
@@ -1176,26 +1149,19 @@ subroutine set_ice_optics(IST, OSS, Tskin_ice, coszen, Rad, G, IG, optics_CSp)
   call get_SIS2_thermo_coefs(IST%ITV, rho_ice=rho_ice, rho_snow=rho_snow, slab_ice=slab_ice)
   H_to_m_snow = IG%H_to_kg_m2 / Rho_snow ; H_to_m_ice = IG%H_to_kg_m2 / Rho_ice
 
-  if (slab_ice) then
-    !$OMP parallel do default(shared) private(avg_alb)
-    do j=jsc,jec ; do k=1,ncat ; do i=isc,iec ; if (IST%part_size(i,j,k) > 0.0) then
-      call slab_ice_optics(IST%mH_snow(i,j,k)*H_to_m_snow, IST%mH_ice(i,j,k)*H_to_m_ice, &
-               Tskin_ice(i,j,k), OSS%T_fr_ocn(i,j), avg_alb)
-    endif ; enddo ; enddo ; enddo
-  else
-    !$OMP parallel do default(shared) private(albedos, sw_abs_lay)
-    do j=jsc,jec ; do k=1,ncat ; do i=isc,iec ; if (IST%part_size(i,j,k) > 0.0) then
-      call ice_optics_SIS2(IST%mH_pond(i,j,k), IST%mH_snow(i,j,k)*H_to_m_snow, &
-               IST%mH_ice(i,j,k)*H_to_m_ice, Tskin_ice(i,j,k), OSS%T_fr_ocn(i,j), IG%NkIce, &
-               albedos(vis_dir), albedos(vis_dif), albedos(nir_dir), albedos(nir_dif), &
-               Rad%sw_abs_sfc(i,j,k),  Rad%sw_abs_snow(i,j,k), &
-               sw_abs_lay, Rad%sw_abs_ocn(i,j,k), Rad%sw_abs_int(i,j,k), &
-               optics_CSp, IST%ITV, coszen_in=coszen(i,j))
+  !$OMP parallel do default(shared) private(albedos, sw_abs_lay)
+  do j=jsc,jec ; do k=1,ncat ; do i=isc,iec ; if (IST%part_size(i,j,k) > 0.0) then
+    call ice_optics_SIS2(IST%mH_pond(i,j,k), IST%mH_snow(i,j,k)*H_to_m_snow, &
+             IST%mH_ice(i,j,k)*H_to_m_ice, Tskin_ice(i,j,k), OSS%T_fr_ocn(i,j), IG%NkIce, &
+             albedos(vis_dir), albedos(vis_dif), albedos(nir_dir), albedos(nir_dif), &
+             Rad%sw_abs_sfc(i,j,k),  Rad%sw_abs_snow(i,j,k), &
+             sw_abs_lay, Rad%sw_abs_ocn(i,j,k), Rad%sw_abs_int(i,j,k), &
+             optics_CSp, IST%ITV, coszen_in=coszen(i,j))
 
-      do m=1,IG%NkIce ; Rad%sw_abs_ice(i,j,k,m) = sw_abs_lay(m) ; enddo
+    do m=1,IG%NkIce ; Rad%sw_abs_ice(i,j,k,m) = sw_abs_lay(m) ; enddo
 
-    endif ; enddo ; enddo ; enddo
-  endif
+  endif ; enddo ; enddo ; enddo
+
 end subroutine set_ice_optics
 
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~!
@@ -1359,12 +1325,16 @@ subroutine fast_radiation_diagnostics(ABT, Ice, IST, Rad, FIA, G, IG, CS, &
   type(time_type),               intent(in)    :: Time_start, Time_end
 
   real, dimension(G%isd:G%ied, G%jsd:G%jed) :: tmp_diag, sw_dn, net_sw, avg_alb
+  real, dimension(G%isd:G%ied, G%jsd:G%jed,size(FIA%flux_sw_dn,3)) :: &
+    sw_dn_bnd  ! The downward shortwave radiation by frequency and angular band
+               ! averaged over all of the ice thickness categories, in W m-2.
   real, dimension(G%isd:G%ied) :: Tskin_avg, ice_conc
   real :: dt_diag
   real    :: Stefan ! The Stefan-Boltzmann constant in W m-2 K-4 as used for
                     ! strictly diagnostic purposes.
   real, parameter :: T_0degC = 273.15 ! 0 degrees C in Kelvin
   integer :: i, j, k, m, i2, j2, k2, i3, j3, isc, iec, jsc, jec, ncat, NkIce
+  integer :: b
   integer :: io_A, jo_A, io_I, jo_I  ! Offsets for indexing conventions.
 
   isc = G%isc ; iec = G%iec ; jsc = G%jsc ; jec = G%jec ; ncat = IG%CatIce
@@ -1424,22 +1394,36 @@ subroutine fast_radiation_diagnostics(ABT, Ice, IST, Rad, FIA, G, IG, CS, &
     call post_data(Rad%id_lwdn, tmp_diag, CS%diag)
   endif
 
-  sw_dn(:,:) = 0.0 ; net_sw(:,:) = 0.0 ; avg_alb(:,:) = 0.0
-!$OMP parallel do default(none) shared(isc,iec,jsc,jec,ncat,G,IST,Ice,ABT, &
-!$OMP                                  io_I,jo_I,io_A,jo_A,sw_dn,net_sw,avg_alb) &
-!$OMP                          private(i2,j2,k2,i3,j3)
+  sw_dn(:,:) = 0.0 ; net_sw(:,:) = 0.0 ; avg_alb(:,:) = 0.0 ; sw_dn_bnd(:,:,:) = 0.0
+  !$OMP parallel do default(shared) private(i2,j2,k2,i3,j3)
   do j=jsc,jec ; do k=0,ncat ; do i=isc,iec ; if (G%mask2dT(i,j)>0.5) then
     i2 = i+io_I ; j2 = j+jo_I ; i3 = i+io_A ; j3 = j+jo_A ; k2 = k+1
     if (associated(ABT%sw_down_vis_dir)) then
       sw_dn(i,j) = sw_dn(i,j) + IST%part_size(i,j,k) * ( &
             (ABT%sw_down_vis_dir(i3,j3,k2) + ABT%sw_down_vis_dif(i3,j3,k2)) + &
             (ABT%sw_down_nir_dir(i3,j3,k2) + ABT%sw_down_nir_dif(i3,j3,k2)) )
+      sw_dn_bnd(i,j,vis_dir) = sw_dn_bnd(i,j,vis_dir) + &
+                     IST%part_size(i,j,k) * ABT%sw_down_vis_dir(i3,j3,k2)
+      sw_dn_bnd(i,j,vis_dif) = sw_dn_bnd(i,j,vis_dif) + &
+                     IST%part_size(i,j,k) * ABT%sw_down_vis_dif(i3,j3,k2)
+      sw_dn_bnd(i,j,nir_dir) = sw_dn_bnd(i,j,nir_dir) + &
+                     IST%part_size(i,j,k) * ABT%sw_down_nir_dir(i3,j3,k2)
+      sw_dn_bnd(i,j,nir_dif) = sw_dn_bnd(i,j,nir_dif) + &
+                     IST%part_size(i,j,k) * ABT%sw_down_nir_dif(i3,j3,k2)
     else
       sw_dn(i,j) = sw_dn(i,j) + IST%part_size(i,j,k) * ( &
             (ABT%sw_flux_vis_dir(i3,j3,k2)/(1-Ice%albedo_vis_dir(i2,j2,k2)) + &
              ABT%sw_flux_vis_dif(i3,j3,k2)/(1-Ice%albedo_vis_dif(i2,j2,k2))) + &
             (ABT%sw_flux_nir_dir(i3,j3,k2)/(1-Ice%albedo_nir_dir(i2,j2,k2)) + &
              ABT%sw_flux_nir_dif(i3,j3,k2)/(1-Ice%albedo_nir_dif(i2,j2,k2))) )
+      sw_dn_bnd(i,j,vis_dir) = sw_dn_bnd(i,j,vis_dir) + IST%part_size(i,j,k) * &
+            (ABT%sw_flux_vis_dir(i3,j3,k2)/(1.0-Ice%albedo_vis_dir(i2,j2,k2)))
+      sw_dn_bnd(i,j,vis_dif) = sw_dn_bnd(i,j,vis_dif) + IST%part_size(i,j,k) * &
+            (ABT%sw_flux_vis_dif(i3,j3,k2)/(1.0-Ice%albedo_vis_dif(i2,j2,k2)))
+      sw_dn_bnd(i,j,nir_dir) = sw_dn_bnd(i,j,nir_dir) + IST%part_size(i,j,k) * &
+            (ABT%sw_flux_nir_dir(i3,j3,k2)/(1.0-Ice%albedo_nir_dir(i2,j2,k2)))
+      sw_dn_bnd(i,j,nir_dif) = sw_dn_bnd(i,j,nir_dif) + IST%part_size(i,j,k) * &
+            (ABT%sw_flux_nir_dif(i3,j3,k2)/(1.0-Ice%albedo_nir_dif(i2,j2,k2)))
     endif
 
     net_sw(i,j) = net_sw(i,j) + IST%part_size(i,j,k) * ( &
@@ -1479,7 +1463,9 @@ subroutine fast_radiation_diagnostics(ABT, Ice, IST, Rad, FIA, G, IG, CS, &
   endif
 
   do j=jsc,jec ; do i=isc,iec ; if (G%mask2dT(i,j)>0.5) then
-    FIA%flux_sw_dn(i,j) = FIA%flux_sw_dn(i,j) + sw_dn(i,j)
+    do b=1,size(FIA%flux_sw_dn,3)
+      FIA%flux_sw_dn(i,j,b) = FIA%flux_sw_dn(i,j,b) + sw_dn_bnd(i,j,b)
+    enddo
   endif ; enddo ; enddo
 
   if (Rad%id_coszen>0) call post_data(Rad%id_coszen, Rad%coszen_nextrad, CS%diag)
@@ -2016,13 +2002,12 @@ subroutine ice_model_init(Ice, Time_Init, Time, Time_step_fast, Time_step_slow, 
       call hchksum(dG%bathyT, 'SIS_initialize_fixed: depth ', dG%HI, &
                    haloshift=min(1, dG%ied-dG%iec, dG%jed-dG%jec))
       call hchksum(dG%mask2dT, 'SIS_initialize_fixed: mask2dT ', dG%HI)
-      call uvchksum_pair(dG%mask2dCu, 'SIS_initialize_fixed: mask2dCu ', &
-                         dG%mask2dCv, 'SIS_initialize_fixed: mask2dCv ', dG%HI)
-      call qchksum(dG%mask2dBu, 'SIS_initialize_fixed: mask2dBu ', dG%HI)
+      call uvchksum('SIS_initialize_fixed: mask2dCu ', &
+                    dG%mask2dCu, dG%mask2dCv, dG%HI)
+      call Bchksum(dG%mask2dBu, 'SIS_initialize_fixed: mask2dBu ', dG%HI)
 
-      call qchksum(dG%CoriolisBu, "SIS_initialize_fixed: f ", dG%HI)
-      call hchksum_pair(dG%dF_dx, "SIS_initialize_fixed: dF_dx ", &
-                        dG%dF_dy, "SIS_initialize_fixed: dF_dy ", dG%HI)
+      call Bchksum(dG%CoriolisBu, "SIS_initialize_fixed: f ", dG%HI)
+      call hchksum_pair("SIS_initialize_fixed: dF_d[xy] ", dG%dF_dx, dG%dF_dy, dG%HI)
     endif
 
     call set_hor_grid(sG, param_file, global_indexing=global_indexing)
@@ -2534,7 +2519,7 @@ subroutine ice_model_init(Ice, Time_Init, Time, Time_step_fast, Time_step_slow, 
                             Ice%sCS%dyn_trans_CSp, dirs%output_directory, Time_Init)
 
     if (Ice%sCS%redo_fast_update) then
-      call SIS_optics_init(param_file, Ice%sCS%optics_CSp)
+      call SIS_optics_init(param_file, Ice%sCS%optics_CSp, slab_optics=slab_ice)
       call SIS_fast_thermo_init(Ice%sCS%Time, sG, sIG, param_file, Ice%sCS%diag, &
                                 Ice%sCS%fast_thermo_CSp)
     endif
@@ -2666,7 +2651,7 @@ subroutine ice_model_init(Ice, Time_Init, Time, Time_step_fast, Time_step_slow, 
 
     call SIS_fast_thermo_init(Ice%fCS%Time, fG, Ice%fCS%IG, param_file, Ice%fCS%diag, &
                               Ice%fCS%fast_thermo_CSp)
-    call SIS_optics_init(param_file, Ice%fCS%optics_CSp)
+    call SIS_optics_init(param_file, Ice%fCS%optics_CSp, slab_optics=slab_ice)
 
     Ice%fCS%Time_step_fast = Time_step_fast
     Ice%fCS%Time_step_slow = Time_step_slow

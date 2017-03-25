@@ -48,7 +48,7 @@ use MOM_time_manager, only : set_date, set_time, operator(+), operator(-)
 use MOM_time_manager, only : operator(>), operator(*), operator(/), operator(/=)
 
 use coupler_types_mod, only : coupler_3d_bc_type
-
+use SIS_optics, only : ice_optics_SIS2, SIS_optics_CS
 use SIS_types, only : ice_state_type, IST_chksum, IST_bounds_check, FIA_chksum
 use SIS_types, only : fast_ice_avg_type, ice_rad_type, simple_OSS_type, total_sfc_flux_type
 use SIS_types, only : VIS_DIR, VIS_DIF, NIR_DIR, NIR_DIF
@@ -67,7 +67,7 @@ implicit none ; private
 public :: do_update_ice_model_fast, SIS_fast_thermo_init, SIS_fast_thermo_end
 public :: accumulate_deposition_fluxes, convert_frost_to_snow
 public :: fast_thermo_CS, avg_top_quantities, total_top_quantities, infill_array
-public :: redo_update_ice_model_fast, rescale_shortwave, find_excess_fluxes
+public :: redo_update_ice_model_fast, find_excess_fluxes
 
 type fast_thermo_CS ; private
   ! These two arrarys are used with column_check when evaluating the enthalpy
@@ -176,7 +176,7 @@ subroutine sum_top_quantities (FIA, ABT, flux_u, flux_v, flux_sh, evap, &
     FIA%flux_lw_top(:,:,:) = 0.0 ; FIA%flux_lh_top(:,:,:) = 0.0
     FIA%flux_sw_top(:,:,:,:) = 0.0
     FIA%lprec_top(:,:,:) = 0.0 ; FIA%fprec_top(:,:,:) = 0.0
-    FIA%flux_sw_dn(:,:) = 0.0 ; FIA%Tskin_avg(:,:) = 0.0
+    FIA%flux_sw_dn(:,:,:) = 0.0 ; FIA%Tskin_avg(:,:) = 0.0
 
     if (allocated(FIA%flux_sh0)) then
       FIA%dshdt(:,:,:) = 0.0 ; FIA%devapdt(:,:,:) = 0.0 ; FIA%dlwdt(:,:,:) = 0.0
@@ -294,8 +294,10 @@ subroutine avg_top_quantities(FIA, Rad, IST, G, IG)
         FIA%tr_flux_top(i,j,k,n) = FIA%tr_flux_top(i,j,k,n) * I_avc
       enddo
     enddo ; enddo
+    do b=1,nb ; do i=isc,iec
+      FIA%flux_sw_dn(i,j,b) = FIA%flux_sw_dn(i,j,b)*I_avc
+    enddo ; enddo
     do i=isc,iec
-      FIA%flux_sw_dn(i,j) = FIA%flux_sw_dn(i,j)*I_avc
       FIA%Tskin_avg(i,j) = FIA%Tskin_avg(i,j) * I_avc
     enddo
   enddo
@@ -494,54 +496,6 @@ subroutine find_excess_fluxes(FIA, TSF, XSF, part_size, G, IG)
 
 end subroutine find_excess_fluxes
 
-!~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~!
-!> rescale_shortwave determines whether any shortwave frequency bands exceed their
-!! intensity during the atmospheric steps and if so scales them back for energy
-!! conservation.  If the shortwave heating in any bands have decreased, the
-!! difference will later be applied to the ocean. 
-subroutine rescale_shortwave(FIA, TSF, part_size, G, IG)
-  type(fast_ice_avg_type),   intent(inout) :: FIA
-  type(total_sfc_flux_type), intent(in)    :: TSF
-  type(SIS_hor_grid_type),   intent(inout) :: G
-  type(ice_grid_type),       intent(in)    :: IG
-  real, dimension(G%isd:G%ied,G%jsd:G%jed,0:IG%CatIce), &
-                             intent(in)    :: part_size
-
-  real, dimension(G%isd:G%ied,size(FIA%flux_sw_top,4)) :: &
-    sw_tot_band
-  real    :: rescale    !  A rescaling factor between 0 and 1.
-  integer :: i, j, k, m, n, b, nb, nfb, isc, iec, jsc, jec, ncat
-  integer :: isd, ied, jsd, jed
-
-  isc = G%isc ; iec = G%iec ; jsc = G%jsc ; jec = G%jec ; ncat = IG%CatIce
-  isd = G%isd ; ied = G%ied ; jsd = G%jsd ; jed = G%jed
-  nb = size(FIA%flux_sw_top,4) ; nfb = nb/2
-
-  do j=jsc,jec
-    sw_tot_band(:,:) = 0.0
-    do k=0,ncat ; do b=1,nb ; do i=isc,iec
-      sw_tot_band(i,b) = sw_tot_band(i,b) + &
-                         part_size(i,j,k) * FIA%flux_sw_top(i,j,k,b)
-    enddo ; enddo ; enddo
-
-    do i=isc,iec ; do b=1,nb-1,2
-      ! Ice can scatter direct shortwave into diffuse without loss of energy
-      ! conservation, so it only the total of the shortwave in each frequency
-      ! band that needs to be considered.  If there are more than 2 angular
-      ! bands (direct and diffuse), this code will need to be modified.
-      if (abs(sw_tot_band(i,b) + sw_tot_band(i,b+1)) > &
-          abs(TSF%flux_sw(i,j,b) + TSF%flux_sw(i,j,b+1))) then
-        rescale = abs(TSF%flux_sw(i,j,b) + TSF%flux_sw(i,j,b+1)) / &
-                  abs(sw_tot_band(i,b) + sw_tot_band(i,b+1))
-        do k=0,ncat
-          FIA%flux_sw_top(i,j,k,b) = rescale * FIA%flux_sw_top(i,j,k,b) 
-          FIA%flux_sw_top(i,j,k,b+1) = rescale * FIA%flux_sw_top(i,j,k,b+1) 
-        enddo
-      endif
-    enddo ; enddo
-  enddo
-
-end subroutine rescale_shortwave
 
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~!
 !> infill_array fills in an array with actual, interpolated or plausible values
@@ -963,16 +917,18 @@ end subroutine accumulate_deposition_fluxes
 !!   profile, subject to the constraint that ice and snow temperatures are never
 !!   above freezing, using fluxes that have been determined during previous calls
 !!   to do_update_ice_model_fast and stored in the fast_ice_avg_type.
-subroutine redo_update_ice_model_fast(IST, sOSS, Rad, FIA, &
+subroutine redo_update_ice_model_fast(IST, sOSS, Rad, FIA, TSF, optics_CSp, &
                                       Time_step, CS, G, IG )
-  type(ice_state_type),          intent(inout) :: IST
-  type(simple_OSS_type),         intent(in)    :: sOSS
-  type(ice_rad_type),            intent(inout) :: Rad
-  type(fast_ice_avg_type),       intent(inout) :: FIA
-  type(time_type),               intent(in)    :: Time_step  ! The amount of time over which to advance the ice.
-  type(fast_thermo_CS),          pointer       :: CS
-  type(SIS_hor_grid_type),       intent(inout) :: G
-  type(ice_grid_type),           intent(in)    :: IG
+  type(ice_state_type),      intent(inout) :: IST
+  type(simple_OSS_type),     intent(in)    :: sOSS
+  type(ice_rad_type),        intent(inout) :: Rad
+  type(fast_ice_avg_type),   intent(inout) :: FIA
+  type(total_sfc_flux_type), intent(in)    :: TSF
+  type(SIS_optics_CS),       intent(in)    :: optics_CSp
+  type(time_type),           intent(in)    :: Time_step  ! The amount of time over which to advance the ice.
+  type(fast_thermo_CS),      pointer       :: CS
+  type(SIS_hor_grid_type),   intent(inout) :: G
+  type(ice_grid_type),       intent(in)    :: IG
 
   real, dimension(0:IG%NkIce) :: T_col ! The temperature of a column of ice and snow in degC.
   real, dimension(IG%NkIce)   :: S_col ! The thermodynamic salinity of a column of ice, in g/kg.
@@ -981,18 +937,40 @@ subroutine redo_update_ice_model_fast(IST, sOSS, Rad, FIA, &
   real :: dt_here, ts_new, dts, hf, hfd, latent
   real :: hf_0    ! The positive upward surface heat flux when T_sfc = 0 C, in W m-2.
   real :: dhf_dt  ! The deriviative of the upward surface heat flux with Ts, in W m-2 C-1.
-  real :: sw_tot ! sum over dir/dif vis/nir components
-  real :: LatHtFus       ! The latent heat of fusion of ice in J/kg.
-  real :: LatHtVap       ! The latent heat of vaporization of water at 0C in J/kg.
-  real :: H_to_m_ice     ! The specific volumes of ice and snow times the
-  real :: H_to_m_snow    ! conversion factor from thickness units, in m H-1.
-  logical :: slab_ice    ! If true, use the very old slab ice thermodynamics,
-                         ! with effectively zero heat capacity of ice and snow.
+  real :: sw_tot  ! sum over dir/dif vis/nir components
+  real :: LatHtFus      ! The latent heat of fusion of ice in J/kg.
+  real :: LatHtVap      ! The latent heat of vaporization of water at 0C in J/kg.
+  real :: rho_ice       ! The nominal density of sea ice in kg m-3.
+  real :: rho_snow      ! The nominal density of snow in kg m-3.
+  real, dimension(size(FIA%flux_sw_top,4)) :: &
+    albedos             ! The ice albedos by directional and wavelength band.
+  real, dimension(IG%NkIce) :: &
+    sw_abs_lay          ! The fractional shortwave absorption by each ice layer.
+  real :: H_to_m_ice    ! The specific volumes of ice and snow times the
+  real :: H_to_m_snow   ! conversion factor from thickness units, in m H-1.
+  logical :: slab_ice   ! If true, use the very old slab ice thermodynamics,
+                        ! with effectively zero heat capacity of ice and snow.
+  real, dimension(G%isd:G%ied,size(FIA%flux_sw_top,4)) :: &
+    sw_tot_ice_band     !   The total shortwave radiation by band, integrated
+                        ! across the ice thickness partitions, but not the open
+                        ! ocean partition, in W m-2.
+  real, dimension(G%isd:G%ied,G%jsd:G%jed,IG%CatIce,size(FIA%flux_sw_top,4)) :: &
+    sw_top_chg          !   The change in the shortwave down due to the new albedos.
+  real    :: flux_sw_prev  ! The previous value of flux_sw_top, in W m-2.
+  real    :: rescale    ! A rescaling factor between 0 and 1.
   type(time_type) :: Dt_ice
   logical :: sent
-  integer :: i, j, k, m, i2, j2, k2, isc, iec, jsc, jec, ncat, i_off, j_off, NkIce
+  logical :: do_any_j
+  logical :: use_new_albedos
+  integer :: i, j, k, m, i2, j2, k2, isc, iec, jsc, jec, ncat, NkIce
+  integer :: b, b2, nb, nbmerge
 
   real :: tot_heat_in, enth_here, enth_imb, norm_enth_imb, SW_absorbed
+  real :: ice_sw_tot ! The sum of shortwave fluxes into the ice and snow, but
+                     ! excluding the fluxes transmitted to the ocean, in W m-2.
+  real :: TSF_sw_tot ! The total of all shortwave fluxes into the snow, ice,
+                     ! and ocean that were previouslly stored in TSF, in W m-2.
+
   real :: enth_liq_0 ! The value of enthalpy for liquid fresh water at 0 C, in
                      ! enthalpy units (sometimes J kg-1).
   real :: enth_units ! A conversion factor from Joules kg-1 to enthalpy units.
@@ -1004,13 +982,16 @@ subroutine redo_update_ice_model_fast(IST, sOSS, Rad, FIA, &
          "SIS_fast_thermo: Module must be initialized before it is used.")
 
   isc = G%isc ; iec = G%iec ; jsc = G%jsc ; jec = G%jec ; ncat = IG%CatIce
+  nb = size(FIA%flux_sw_top,4)
   NkIce = IG%NkIce ; I_Nk = 1.0 / NkIce ; kg_H_Nk = IG%H_to_kg_m2 * I_Nk
 
   if (CS%debug) &
     call IST_chksum("Start redo_update_ice_model_fast", IST, G, IG)
 
   call get_SIS2_thermo_coefs(IST%ITV, ice_salinity=S_col, enthalpy_units=enth_units, &
-                             Latent_fusion=LatHtFus, Latent_vapor=LatHtVap, slab_ice=slab_ice)
+                             Latent_fusion=LatHtFus, Latent_vapor=LatHtVap, &
+                             rho_ice=rho_ice, rho_snow=rho_snow, slab_ice=slab_ice)
+  H_to_m_snow = IG%H_to_kg_m2 / Rho_snow ; H_to_m_ice = IG%H_to_kg_m2 / Rho_ice
 
   !
   ! implicit update of ice surface temperature
@@ -1019,27 +1000,87 @@ subroutine redo_update_ice_model_fast(IST, sOSS, Rad, FIA, &
 
   enth_liq_0 = Enth_from_TS(0.0, 0.0, IST%ITV) ; I_enth_unit = 1.0 / enth_units
 
-!###  RESCALE THE RADIATION
-!###  IS Rad A VALID TYPE TO USE?
-!###  DO WE NEED TO UPDATE RAD%T_SKIN?  (PROBABLY ONLY FOR DIAGNOSTICS?)
+  ! Ice can scatter direct shortwave into diffuse without loss of energy
+  ! conservation, so it only the total of the shortwave in each frequency
+  ! band that needs to be considered.  The effect of setting, nbmerge=2 is to
+  ! combine direct and diffuse radiation bands of the same wavelength.
+  nbmerge = 2
+  ! Setting nbmerge=nb only considers the total of all shortwave bands, which
+  ! is appropriate considering that all heat fluxes to the ocean are currently
+  ! treated as diffuse visible light by SIS2.
+  nbmerge = nb  
 
 ! I do not know if this is necessary or whether it would work. - RWH
 !  do j=jsc,jec ; do i=isc,iec
 !    FIA%bheat(i,j) = sOSS%bheat(i,j)
 !  enddo ; enddo
 
-!$OMP parallel do default(none) shared(isc,iec,jsc,jec,ncat,NkIce,IST,enth_liq_0,&
-!$OMP                                  dt_here,I_enth_unit,G,S_col,kg_H_Nk,slab_ice,&
-!$OMP                                  enth_units,LatHtFus,LatHtVap,IG,sOSS,FIA,Rad,CS) &
-!$OMP                          private(latent,enth_col,sw_tot,dhf_dt,                  &
-!$OMP                                  hf_0,ts_new,SW_abs_col,SW_absorbed,enth_here,&
-!$OMP                                  tot_heat_in,enth_imb,norm_enth_imb )
-  do j=jsc,jec ; do k=1,ncat ; do i=isc,iec
-    ! If there are multiple calls to redo_update_ice_model_fast between calls to
-    ! slow_thermodynamics, this call would only occur during the first such call.
-    FIA%tmelt(i,j,k) = 0.0 ; FIA%bmelt(i,j,k) = 0.0
+  ! If there are multiple calls to redo_update_ice_model_fast between calls to
+  ! slow_thermodynamics, this call would only occur during the first such call.
+  FIA%tmelt(:,:,:) = 0.0 ; FIA%bmelt(:,:,:) = 0.0
+  sw_top_chg(:,:,:,:) = 0.0
+  use_new_albedos = .true.  ! Changing this value changes answers at the level of roundoff.
 
-    if (IST%part_size(i,j,k) > 0.0) then
+  !$OMP parallel do default(shared) private(do_any_j, albedos, sw_abs_lay, &
+  !$OMP                 sw_tot_ice_band,ice_sw_tot,TSF_sw_tot,rescale, &
+  !$OMP                 latent,enth_col,sw_tot,dhf_dt,hf_0,ts_new,SW_abs_col,&
+  !$OMP                 SW_absorbed,enth_here,tot_heat_in,enth_imb,norm_enth_imb )
+  do j=jsc,jec
+    do_any_j = .false.
+    do k=1,ncat ; do i=isc,iec ; if (IST%part_size(i,j,k) > 0.0) then
+      do_any_j = .true.
+      call ice_optics_SIS2(IST%mH_pond(i,j,k), IST%mH_snow(i,j,k)*H_to_m_snow, &
+               IST%mH_ice(i,j,k)*H_to_m_ice, Rad%Tskin_Rad(i,j,k), sOSS%T_fr_ocn(i,j), IG%NkIce, &
+               albedos(vis_dir), albedos(vis_dif), albedos(nir_dir), albedos(nir_dif), &
+               Rad%sw_abs_sfc(i,j,k),  Rad%sw_abs_snow(i,j,k), &
+               sw_abs_lay, Rad%sw_abs_ocn(i,j,k), Rad%sw_abs_int(i,j,k), &
+               optics_CSp, IST%ITV, coszen_in=Rad%coszen_lastrad(i,j))
+
+      if (use_new_albedos) then ; do b=1,nb ; if (FIA%flux_sw_dn(i,j,b) > 0.0) then
+        flux_sw_prev = FIA%flux_sw_top(i,j,k,b)
+        FIA%flux_sw_top(i,j,k,b) = (1.0 - albedos(b))*FIA%flux_sw_dn(i,j,b)
+        sw_top_chg(i,j,k,b) = FIA%flux_sw_top(i,j,k,b) - flux_sw_prev
+      endif ; enddo ; endif
+
+      do m=1,IG%NkIce ; Rad%sw_abs_ice(i,j,k,m) = sw_abs_lay(m) ; enddo
+    endif ; enddo ; enddo
+    if (.not. do_any_j) cycle  ! Skip to the next j-loop if there is no ice.
+
+    !    Determine whether the shortwave fluxes absorbed by the ice and snow in
+    ! any shortwave frequency bands (or groups of bands) exceed the total
+    ! shortwave absorption during the atmospheric steps, and if so scale them 
+    ! back for energy conservation.  If the shortwave absorption by the ice in
+    ! any bands have decreased or increased only slightly, the difference will
+    ! later be applied to the ocean.
+
+    sw_tot_ice_band(:,:) = 0.0
+    ! Note that the flux to the ocean is deliberately omitted here.
+    ! Properly the raditive properties should be treated separately for each band.
+    do k=1,ncat ; do b=1,nb ; do i=isc,iec
+      sw_tot_ice_band(i,b) = sw_tot_ice_band(i,b) + IST%part_size(i,j,k) * &
+               ((1.0 - Rad%sw_abs_ocn(i,j,k)) * FIA%flux_sw_top(i,j,k,b))
+    enddo ; enddo ; enddo
+
+    do i=isc,iec ; do b=1,nb,nbmerge
+      ice_sw_tot = 0.0 ; TSF_sw_tot = 0.0
+      do b2=0,nbmerge-1
+        ice_sw_tot = ice_sw_tot + sw_tot_ice_band(i,b+b2)
+        TSF_sw_tot = TSF_sw_tot + TSF%flux_sw(i,j,b+b2)
+      enddo
+      if (abs(ice_sw_tot) > abs(TSF_sw_tot)) then
+        rescale = abs(TSF_sw_tot) /  abs(ice_sw_tot)
+        ! Note that the shortwave flux to the ocean will be adjusted later
+        ! so that the total shortwave heat fluxes agree with the initial
+        ! calculation as passed from the atmosphere; that is where conservation
+        ! is acheived.  This is the least agressive rescaling that will avoid
+        ! having negative shortwave fluxes into the ocean.
+        do b2=0,nbmerge-1 ; do k=0,ncat
+          FIA%flux_sw_top(i,j,k,b+b2) = rescale * FIA%flux_sw_top(i,j,k,b+b2) 
+        enddo ; enddo
+      endif
+    enddo ; enddo
+
+    do k=1,ncat ; do i=isc,iec ; if (IST%part_size(i,j,k) > 0.0) then
       enth_col(0) = IST%enth_snow(i,j,k,1)
       do m=1,NkIce ; enth_col(m) = IST%enth_ice(i,j,k,m) ; enddo
 
@@ -1055,11 +1096,6 @@ subroutine redo_update_ice_model_fast(IST, sOSS, Rad, FIA, &
       endif
       sw_tot = (FIA%flux_sw_top(i,j,k,vis_dir) + FIA%flux_sw_top(i,j,k,vis_dif)) + &
                (FIA%flux_sw_top(i,j,k,nir_dir) + FIA%flux_sw_top(i,j,k,nir_dif))
-
-!  This was:
-!      hf_0 = ((flux_sh(i,j,k) + evap(i,j,k)*latent) - &
-!              (flux_lw(i,j,k) + Rad%sw_abs_sfc(i,j,k)*sw_tot)) - &
-!             dhf_dt * Rad%t_skin(i,j,k)
 
       dhf_dt = (FIA%dshdt(i,j,k) + FIA%devapdt(i,j,k)*latent) - FIA%dlwdt(i,j,k)
       hf_0 = (FIA%flux_sh0(i,j,k) + FIA%evap0(i,j,k)*latent) - &
@@ -1088,19 +1124,10 @@ subroutine redo_update_ice_model_fast(IST, sOSS, Rad, FIA, &
       FIA%flux_lw_top(i,j,k) = FIA%flux_lw0(i,j,k) + ts_new * FIA%dlwdt(i,j,k)
       FIA%flux_lh_top(i,j,k) = latent * FIA%evap_top(i,j,k)
 
-      ! Convert frost forming atop sea ice into frozen precip.
-!      if ((k>0) .and. (FIA%evap_top(i,j,k) < 0.0)) then
-!        FIA%fprec_top(i,j,k) = FIA%fprec_top(i,j,k) - FIA%evap_top(i,j,k)
-!        FIA%evap_top(i,j,k) = 0.0
-!      endif
-!    else ! IST%mH_ice <= 0
-!      flux_lh(i,j,k) = LatHtVap * evap(i,j,k)
-
       ! Copy radiation fields from the fast to the slow states.
       FIA%sw_abs_ocn(i,j,k) = Rad%sw_abs_ocn(i,j,k)
-
-    endif
-  enddo ; enddo ; enddo
+    endif ; enddo ; enddo
+  enddo
 
   if (CS%debug) &
     call IST_chksum("End redo_update_ice_model_fast", IST, G, IG)
