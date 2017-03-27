@@ -10,7 +10,8 @@ use coupler_types_mod, only : coupler_2d_bc_type, coupler_3d_bc_type
 use fms_mod,           only : stdout
 use mpp_mod,           only : mpp_chksum
 use mpp_parameter_mod, only : CGRID_NE, BGRID_NE, AGRID
-use MOM_transform_test, only : transform
+use MOM_transform_test, only : transform_pointer, undo_transform_pointer, swap_pointer
+use MOM_transform_test, only : swap_pointer
 
 implicit none ; private
 
@@ -18,14 +19,15 @@ public :: ocean_ice_boundary_type, atmos_ice_boundary_type
 public :: land_ice_boundary_type
 public :: ocn_ice_bnd_type_chksum, atm_ice_bnd_type_chksum
 public :: lnd_ice_bnd_type_chksum
-public :: transform_atmos_boundary, deallocate_atmos_boundary
-public :: transform_land_boundary, deallocate_land_boundary
+public :: transform_atmos_ice_boundary, undo_transform_atmos_ice_boundary
+public :: transform_land_ice_boundary, undo_transform_land_ice_boundary
+public :: transform_ocean_ice_boundary, undo_transform_ocean_ice_boundary
 
 !   The following three types are for data exchange with the FMS coupler
 ! they are defined here but declared in coupler_main and allocated in flux_init.
 
 type ocean_ice_boundary_type
-  real, dimension(:,:),   pointer :: &
+  real, dimension(:,:),  contiguous, pointer :: &
     u      => NULL(), &  ! The x-direction ocean velocity at a position
                          ! determined by stagger, in m s-1.
     v      => NULL(), &  ! The y-direction ocean velocity at a position
@@ -42,7 +44,7 @@ type ocean_ice_boundary_type
 end type ocean_ice_boundary_type
 
 type atmos_ice_boundary_type
-  real, dimension(:,:,:), pointer :: &
+  real, dimension(:,:,:), contiguous, pointer :: &
     u_flux  => NULL(), & ! The true-eastward stresses (momentum fluxes) from the atmosphere
                          ! to the ocean or ice in each category, discretized on an A-grid,
                          ! and _not_ rotated to align with the model grid, in Pa.
@@ -92,7 +94,7 @@ type atmos_ice_boundary_type
 end type atmos_ice_boundary_type
 
 type land_ice_boundary_type
-  real, dimension(:,:),   pointer :: &
+  real, dimension(:,:), contiguous,  pointer :: &
     runoff  =>NULL(), &  ! The liquid runoff into the ocean, in kg m-2.
     calving =>NULL(), &  ! The frozen runoff into each cell, that is offered
                          ! first to the icebergs (if any), where it might be
@@ -110,144 +112,169 @@ end type land_ice_boundary_type
 
 contains
 
-#define ALLOCATE_TRANSFORMED_3D(A, B) allocate(A(size(B, 2), size(B, 1), size(B, 3)))
-#define ALLOCATE_TRANSFORMED_2D(A, B) allocate(A(size(B, 2), size(B, 1)))
-
-subroutine transform_atmos_boundary(AIB, AIB_trans)
-  type(atmos_ice_boundary_type),    intent(inout) :: AIB
-  type(atmos_ice_boundary_type),    intent(inout) :: AIB_trans
-
-  ALLOCATE_TRANSFORMED_3D(AIB_trans%u_flux, AIB%u_flux)
-  ALLOCATE_TRANSFORMED_3D(AIB_trans%v_flux, AIB%v_flux)
-  ALLOCATE_TRANSFORMED_3D(AIB_trans%u_star, AIB%u_star)
-  ALLOCATE_TRANSFORMED_3D(AIB_trans%t_flux, AIB%t_flux)
-  ALLOCATE_TRANSFORMED_3D(AIB_trans%q_flux, AIB%q_flux)
-  ALLOCATE_TRANSFORMED_3D(AIB_trans%lw_flux, AIB%lw_flux)
-
-  ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_flux_vis_dir, AIB%sw_flux_vis_dir)
-  ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_flux_vis_dif, AIB%sw_flux_vis_dif)
-  ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_flux_nir_dir, AIB%sw_flux_nir_dir)
-  ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_flux_nir_dif, AIB%sw_flux_nir_dif)
-
-  if (associated(AIB%sw_down_vis_dir)) &
-    ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_down_vis_dir, AIB%sw_down_vis_dir)
-  if (associated(AIB%sw_down_vis_dif)) &
-    ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_down_vis_dif, AIB%sw_down_vis_dif)
-  if (associated(AIB%sw_down_nir_dir)) &
-    ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_down_nir_dir, AIB%sw_down_nir_dir)
-  if (associated(AIB%sw_down_nir_dir)) &
-   ALLOCATE_TRANSFORMED_3D(AIB_trans%sw_down_nir_dif, AIB%sw_down_nir_dif)
-
-  ALLOCATE_TRANSFORMED_3D(AIB_trans%lprec, AIB%lprec)
-  ALLOCATE_TRANSFORMED_3D(AIB_trans%fprec, AIB%fprec)
-
-  ALLOCATE_TRANSFORMED_3D(AIB_trans%dhdt, AIB%dhdt)
-  ALLOCATE_TRANSFORMED_3D(AIB_trans%dedt, AIB%dedt)
-  ALLOCATE_TRANSFORMED_3D(AIB_trans%drdt, AIB%drdt)
-
-  ALLOCATE_TRANSFORMED_3D(AIB_trans%coszen, AIB%coszen)
-  ALLOCATE_TRANSFORMED_3D(AIB_trans%p, AIB%p)
-  if (associated(AIB%data)) &
-    ALLOCATE_TRANSFORMED_3D(AIB_trans%data, AIB%data)
-
-  call transform(AIB%u_flux, AIB_trans%u_flux)
-  call transform(AIB%v_flux, AIB_trans%v_flux)
-  call transform(AIB%u_star, AIB_trans%u_star)
-  call transform(AIB%t_flux, AIB_trans%t_flux)
-  call transform(AIB%q_flux, AIB_trans%q_flux)
-  call transform(AIB%lw_flux, AIB_trans%lw_flux)
-
-  call transform(AIB%sw_flux_vis_dir, AIB_trans%sw_flux_vis_dir)
-  call transform(AIB%sw_flux_vis_dif, AIB_trans%sw_flux_vis_dif)
-  call transform(AIB%sw_flux_nir_dir, AIB_trans%sw_flux_nir_dir)
-  call transform(AIB%sw_flux_nir_dif, AIB_trans%sw_flux_nir_dif)
-
-  if (associated(AIB%sw_down_vis_dir)) &
-    call transform(AIB%sw_down_vis_dir, AIB_trans%sw_down_vis_dir)
-  if (associated(AIB%sw_down_vis_dif)) &
-    call transform(AIB%sw_down_vis_dif, AIB_trans%sw_down_vis_dif)
-  if (associated(AIB%sw_down_nir_dir)) &
-    call transform(AIB%sw_down_nir_dir, AIB_trans%sw_down_nir_dir)
-  if (associated(AIB%sw_down_nir_dif)) &
-    call transform(AIB%sw_down_nir_dif, AIB_trans%sw_down_nir_dif)
-
-  call transform(AIB%lprec, AIB_trans%lprec)
-  call transform(AIB%fprec, AIB_trans%fprec)
-
-  call transform(AIB%dhdt, AIB_trans%dhdt)
-  call transform(AIB%dedt, AIB_trans%dedt)
-  call transform(AIB%drdt, AIB_trans%drdt)
-
-  call transform(AIB%coszen, AIB_trans%coszen)
-  call transform(AIB%p, AIB_trans%p)
-  if (associated(AIB%data)) &
-    call transform(AIB%data, AIB_trans%data)
-
-end subroutine transform_atmos_boundary
-
-subroutine deallocate_atmos_boundary(AIB)
+subroutine transform_atmos_ice_boundary(AIB)
   type(atmos_ice_boundary_type),    intent(inout) :: AIB
 
-  deallocate(AIB%u_flux)
-  deallocate(AIB%v_flux)
-  deallocate(AIB%u_star)
-  deallocate(AIB%t_flux)
-  deallocate(AIB%q_flux)
-  deallocate(AIB%lw_flux)
+  integer :: index, m, n
 
-  deallocate(AIB%sw_flux_vis_dir)
-  deallocate(AIB%sw_flux_vis_dif)
-  deallocate(AIB%sw_flux_nir_dir)
-  deallocate(AIB%sw_flux_nir_dif)
+  call transform_pointer(AIB%u_flux)
+  call transform_pointer(AIB%v_flux)
+  call swap_pointer(AIB%u_flux, AIB%v_flux)
+
+  call transform_pointer(AIB%u_star)
+  call transform_pointer(AIB%t_flux)
+  call transform_pointer(AIB%q_flux)
+  call transform_pointer(AIB%lw_flux)
+
+  call transform_pointer(AIB%sw_flux_vis_dir)
+  call transform_pointer(AIB%sw_flux_vis_dif)
+  call transform_pointer(AIB%sw_flux_nir_dir)
+  call transform_pointer(AIB%sw_flux_nir_dif)
 
   if (associated(AIB%sw_down_vis_dir)) &
-    deallocate(AIB%sw_down_vis_dir)
+    call transform_pointer(AIB%sw_down_vis_dir)
   if (associated(AIB%sw_down_vis_dif)) &
-    deallocate(AIB%sw_down_vis_dif)
+    call transform_pointer(AIB%sw_down_vis_dif)
   if (associated(AIB%sw_down_nir_dir)) &
-    deallocate(AIB%sw_down_nir_dir)
+    call transform_pointer(AIB%sw_down_nir_dir)
   if (associated(AIB%sw_down_nir_dif)) &
-    deallocate(AIB%sw_down_nir_dif)
+    call transform_pointer(AIB%sw_down_nir_dif)
 
-  deallocate(AIB%lprec)
-  deallocate(AIB%fprec)
+  call transform_pointer(AIB%lprec)
+  call transform_pointer(AIB%fprec)
 
-  deallocate(AIB%dhdt)
-  deallocate(AIB%dedt)
-  deallocate(AIB%drdt)
+  call transform_pointer(AIB%dhdt)
+  call transform_pointer(AIB%dedt)
+  call transform_pointer(AIB%drdt)
 
-  deallocate(AIB%coszen)
-  deallocate(AIB%p)
+  call transform_pointer(AIB%coszen)
+  call transform_pointer(AIB%p)
   if (associated(AIB%data)) &
-    deallocate(AIB%data)
+    call transform_pointer(AIB%data)
 
-end subroutine deallocate_atmos_boundary
+  index = 0
+  do n=1,AIB%fluxes%num_bcs
+    do m=1,AIB%fluxes%bc(n)%num_fields
+      call transform_pointer(AIB%fluxes%bc(n)%field(m)%values)
+    enddo
+  enddo
 
-subroutine transform_land_boundary(LIB, LIB_trans)
-  type(land_ice_boundary_type),    intent(in) :: LIB
-  type(land_ice_boundary_type),    intent(inout) :: LIB_trans
+end subroutine transform_atmos_ice_boundary
 
-  ALLOCATE_TRANSFORMED_2D(LIB_trans%runoff, LIB%runoff)
-  ALLOCATE_TRANSFORMED_2D(LIB_trans%calving, LIB%calving)
-  ALLOCATE_TRANSFORMED_2D(LIB_trans%runoff_hflx, LIB%runoff_hflx)
-  ALLOCATE_TRANSFORMED_2D(LIB_trans%calving_hflx, LIB%calving_hflx)
+subroutine undo_transform_atmos_ice_boundary(AIB)
+  type(atmos_ice_boundary_type),    intent(inout) :: AIB
 
-  call transform(LIB%runoff, LIB_trans%runoff)
-  call transform(LIB%calving, LIB_trans%calving)
-  call transform(LIB%runoff_hflx, LIB_trans%runoff_hflx)
-  call transform(LIB%calving_hflx, LIB_trans%calving_hflx)
+  integer :: index, m, n 
 
-end subroutine transform_land_boundary
+  call undo_transform_pointer(AIB%u_flux)
+  call undo_transform_pointer(AIB%v_flux)
+  call swap_pointer(AIB%u_flux, AIB%v_flux)
 
-subroutine deallocate_land_boundary(LIB)
+  call undo_transform_pointer(AIB%u_star)
+  call undo_transform_pointer(AIB%t_flux)
+  call undo_transform_pointer(AIB%q_flux)
+  call undo_transform_pointer(AIB%lw_flux)
+
+  call undo_transform_pointer(AIB%sw_flux_vis_dir)
+  call undo_transform_pointer(AIB%sw_flux_vis_dif)
+  call undo_transform_pointer(AIB%sw_flux_nir_dir)
+  call undo_transform_pointer(AIB%sw_flux_nir_dif)
+
+  if (associated(AIB%sw_down_vis_dir)) &
+    call undo_transform_pointer(AIB%sw_down_vis_dir)
+  if (associated(AIB%sw_down_vis_dif)) &
+    call undo_transform_pointer(AIB%sw_down_vis_dif)
+  if (associated(AIB%sw_down_nir_dir)) &
+    call undo_transform_pointer(AIB%sw_down_nir_dir)
+  if (associated(AIB%sw_down_nir_dif)) &
+    call undo_transform_pointer(AIB%sw_down_nir_dif)
+
+  call undo_transform_pointer(AIB%lprec)
+  call undo_transform_pointer(AIB%fprec)
+
+  call undo_transform_pointer(AIB%dhdt)
+  call undo_transform_pointer(AIB%dedt)
+  call undo_transform_pointer(AIB%drdt)
+
+  call undo_transform_pointer(AIB%coszen)
+  call undo_transform_pointer(AIB%p)
+  if (associated(AIB%data)) &
+    call undo_transform_pointer(AIB%data)
+
+  index = 0
+  do n=1,AIB%fluxes%num_bcs
+    do m=1,AIB%fluxes%bc(n)%num_fields
+      call undo_transform_pointer(AIB%fluxes%bc(n)%field(m)%values)
+    enddo
+  enddo
+
+end subroutine undo_transform_atmos_ice_boundary
+
+subroutine transform_land_ice_boundary(LIB)
   type(land_ice_boundary_type),    intent(inout) :: LIB
 
-  deallocate(LIB%runoff)
-  deallocate(LIB%calving)
-  deallocate(LIB%runoff_hflx)
-  deallocate(LIB%calving_hflx)
+  call transform_pointer(LIB%runoff)
+  call transform_pointer(LIB%calving)
+  call transform_pointer(LIB%runoff_hflx)
+  call transform_pointer(LIB%calving_hflx)
 
-end subroutine deallocate_land_boundary
+end subroutine transform_land_ice_boundary
+
+subroutine undo_transform_land_ice_boundary(LIB)
+  type(land_ice_boundary_type),    intent(inout) :: LIB
+
+  call undo_transform_pointer(LIB%runoff)
+  call undo_transform_pointer(LIB%calving)
+  call undo_transform_pointer(LIB%runoff_hflx)
+  call undo_transform_pointer(LIB%calving_hflx)
+
+end subroutine undo_transform_land_ice_boundary
+
+subroutine transform_ocean_ice_boundary(OIB)
+  type(ocean_ice_boundary_type),    intent(inout) :: OIB
+
+  integer :: n, m, index
+
+  call transform_pointer(OIB%u)
+  call transform_pointer(OIB%v)
+  call swap_pointer(OIB%u, OIB%v)
+
+  call transform_pointer(OIB%t)
+  call transform_pointer(OIB%s)
+  call transform_pointer(OIB%frazil)
+  call transform_pointer(OIB%sea_level)
+
+  index = 0
+  do n=1,OIB%fields%num_bcs
+    do m=1,OIB%fields%bc(n)%num_fields
+      call transform_pointer(OIB%fields%bc(n)%field(m)%values)
+    enddo
+  enddo
+
+end subroutine transform_ocean_ice_boundary
+
+subroutine undo_transform_ocean_ice_boundary(OIB)
+  type(ocean_ice_boundary_type),    intent(inout) :: OIB
+
+  integer :: n, m, index
+
+  call undo_transform_pointer(OIB%u)
+  call undo_transform_pointer(OIB%v)
+  call swap_pointer(OIB%u, OIB%v)
+
+  call undo_transform_pointer(OIB%t)
+  call undo_transform_pointer(OIB%s)
+  call undo_transform_pointer(OIB%frazil)
+  call undo_transform_pointer(OIB%sea_level)
+
+  index = 0
+  do n=1,OIB%fields%num_bcs
+    do m=1,OIB%fields%bc(n)%num_fields
+      call undo_transform_pointer(OIB%fields%bc(n)%field(m)%values)
+    enddo
+  enddo
+
+end subroutine undo_transform_ocean_ice_boundary
 
 subroutine ocn_ice_bnd_type_chksum(id, timestep, bnd_type)
 

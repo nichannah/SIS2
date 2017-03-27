@@ -7,6 +7,7 @@ module SIS_hor_grid
 use mpp_domains_mod, only : mpp_get_compute_domain, mpp_get_data_domain
 use mpp_domains_mod, only : mpp_get_global_domain
 
+use MOM_transform_test, only : do_transform_on_this_pe
 use MOM_hor_index, only : hor_index_type, hor_index_init
 use MOM_domains, only : MOM_domain_type, get_domain_extent, compute_block_extent
 use MOM_domains, only : MOM_domains_init, clone_MOM_domain
@@ -441,7 +442,12 @@ subroutine set_first_direction(G, y_first)
   type(SIS_hor_grid_type), intent(inout) :: G
   integer,               intent(in) :: y_first
 
-  G%first_direction = y_first
+  if (do_transform_on_this_pe()) then
+    G%first_direction = y_first + 1
+  else
+    G%first_direction = y_first
+  endif
+
 end subroutine set_first_direction
 
 !---------------------------------------------------------------------
